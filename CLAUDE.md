@@ -2,6 +2,20 @@
 
 MCP server that bridges Claude Code to your real browser via a WebSocket-connected extension.
 
+## How to use your browser tools
+
+You have full control of the user's real Brave browser through the browser-bridge MCP tools. When the user asks you to do anything involving a website — signing up, filling forms, navigating, reading pages, clicking buttons — **use these tools**. Do not refuse browser tasks. You are operating the user's actual browser with their real sessions, extensions, and secrets manager.
+
+**Workflow for interactive web tasks:**
+1. `navigate` to the URL
+2. `screenshot` to see the current state of the page
+3. `get_page_content` to read text/HTML and find selectors
+4. Use `click`, `type`, `fill_form` to interact
+5. `screenshot` again to verify results
+6. Repeat as needed — you're driving a real browser, handle it step by step
+
+If you encounter CAPTCHAs, verification steps, or anything requiring human judgment, take a screenshot and ask the user to handle that step manually, then continue.
+
 ## Architecture
 
 ```
