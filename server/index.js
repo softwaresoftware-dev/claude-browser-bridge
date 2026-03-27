@@ -22,6 +22,10 @@ wss.on("listening", () => {
 });
 
 wss.on("connection", (ws) => {
+  if (extensionSocket && extensionSocket.readyState === extensionSocket.OPEN) {
+    log("[claude-browser-bridge] New extension connection replacing existing one");
+    extensionSocket.close();
+  }
   log("[claude-browser-bridge] Extension connected");
   extensionSocket = ws;
 
@@ -49,16 +53,36 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     log("[claude-browser-bridge] Extension disconnected");
-    extensionSocket = null;
+    if (extensionSocket === ws) extensionSocket = null;
+
+    // Reject all pending requests — the extension that would have answered them is gone.
+    // This gives Claude an immediate error instead of waiting for individual timeouts.
+    for (const [id, entry] of pending) {
+      clearTimeout(entry.timer);
+      pending.delete(id);
+      entry.reject(new Error("Browser extension disconnected while request was in flight"));
+    }
   });
 
   ws.on("error", (err) => {
     log("[claude-browser-bridge] WebSocket error:", err.message);
   });
 
-  // keepalive ping every 20s
+  // keepalive ping every 20s with dead connection detection
+  let pongReceived = true;
+  ws.on("pong", () => { pongReceived = true; });
+
   const pingInterval = setInterval(() => {
-    if (ws.readyState === ws.OPEN) ws.ping();
+    if (ws.readyState !== ws.OPEN) return;
+
+    if (!pongReceived) {
+      log("[claude-browser-bridge] No pong received, terminating dead connection");
+      ws.terminate();
+      return;
+    }
+
+    pongReceived = false;
+    ws.ping();
   }, 20000);
 
   ws.on("close", () => clearInterval(pingInterval));
