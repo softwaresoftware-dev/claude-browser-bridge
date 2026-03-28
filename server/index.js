@@ -14,11 +14,42 @@ const pending = new Map();
 
 // --- WebSocket server (talks to browser extension) ---
 
-const wss = new WebSocketServer({ port: PORT });
 const log = (...args) => process.stderr.write(args.join(" ") + "\n");
 
-wss.on("listening", () => {
-  log(`[claude-browser-bridge] WebSocket server listening on ws://localhost:${PORT}`);
+const wss = await new Promise((resolve, reject) => {
+  const server = new WebSocketServer({ port: PORT });
+  server.on("listening", () => {
+    log(`[claude-browser-bridge] WebSocket server listening on ws://localhost:${PORT}`);
+    resolve(server);
+  });
+  server.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+      log(`[claude-browser-bridge] Port ${PORT} in use, killing stale process...`);
+      import("child_process").then(({ execSync }) => {
+        try {
+          const pid = execSync(`lsof -ti :${PORT}`, { encoding: "utf8" }).trim();
+          if (pid) {
+            for (const p of pid.split("\n")) {
+              log(`[claude-browser-bridge] Killing PID ${p}`);
+              process.kill(parseInt(p), "SIGTERM");
+            }
+          }
+        } catch { /* no process found */ }
+
+        // Retry after a brief delay
+        setTimeout(() => {
+          const retry = new WebSocketServer({ port: PORT });
+          retry.on("listening", () => {
+            log(`[claude-browser-bridge] WebSocket server listening on ws://localhost:${PORT} (after retry)`);
+            resolve(retry);
+          });
+          retry.on("error", (retryErr) => reject(retryErr));
+        }, 500);
+      });
+    } else {
+      reject(err);
+    }
+  });
 });
 
 wss.on("connection", (ws) => {
