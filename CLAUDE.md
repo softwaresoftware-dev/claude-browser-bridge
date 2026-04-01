@@ -66,6 +66,18 @@ claude --plugin-dir /home/thatcher/projects/nov/projects/mcps/claude-browser-bri
 
 ### 4. Restart Claude Code
 
+## Development (hot reload)
+
+When working in this repo, you can edit and test daemon code without restarting Claude Code:
+
+1. Edit `daemon.js` or any code it imports
+2. Restart the daemon: `daemon_stop("claude-browser-bridge")` then `daemon_start(...)`
+3. The MCP client auto-reconnects — test your changes immediately
+
+**What you can hot-reload:** `daemon.js` and anything it imports (the daemon process restarts, client reconnects).
+
+**What needs a Claude Code restart:** `index.js`, `tools.js` (tool schemas), `ipc.js` — these are loaded once by the MCP client process at session start.
+
 ## Commands
 
 - `make dev` — run the MCP server directly (for testing, normally Claude Code launches it)
