@@ -1,0 +1,19 @@
+{
+  "name": "claude-browser-bridge",
+  "description": "MCP bridge between Claude Code and your browser via WebSocket extension and shared daemon.",
+  "version": "2.0.0",
+  "author": {
+    "name": "Thatcher",
+    "url": "https://github.com/ThatcherT"
+  },
+  "repository": "https://github.com/ThatcherT/claude-browser-bridge",
+  "license": "MIT",
+  "keywords": ["browser", "websocket", "extension", "automation"],
+  "mcpServers": {
+    "claude-browser-bridge": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server/index.js"],
+      "cwd": "${CLAUDE_PLUGIN_ROOT}"
+    }
+  }
+}

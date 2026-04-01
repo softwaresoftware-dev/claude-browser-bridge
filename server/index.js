@@ -1,153 +1,127 @@
 #!/usr/bin/env node
 
+/**
+ * Browser-bridge MCP client — thin passthrough that connects to the daemon
+ * via IPC and exposes browser tools over stdio to Claude Code.
+ *
+ * The daemon (daemon.js) owns the WebSocket connection to the browser extension.
+ * This process just relays tool calls to the daemon and returns responses.
+ */
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { WebSocketServer } from "ws";
+import { createConnection } from "net";
 import { randomUUID } from "crypto";
 import { registerTools } from "./tools.js";
+import { getIpcAddress, createNdjsonParser, sendNdjson } from "./ipc.js";
 
-const PORT = parseInt(process.env.BROWSER_BRIDGE_PORT || "7225", 10);
 const DEFAULT_TIMEOUT = 30000;
-
-let extensionSocket = null;
-const pending = new Map();
-
-// --- WebSocket server (talks to browser extension) ---
-
 const log = (...args) => process.stderr.write(args.join(" ") + "\n");
 
-const wss = await new Promise((resolve, reject) => {
-  const server = new WebSocketServer({ port: PORT });
-  server.on("listening", () => {
-    log(`[claude-browser-bridge] WebSocket server listening on ws://localhost:${PORT}`);
-    resolve(server);
-  });
-  server.on("error", (err) => {
-    if (err.code === "EADDRINUSE") {
-      log(`[claude-browser-bridge] Port ${PORT} in use, killing stale process...`);
-      import("child_process").then(({ execSync }) => {
-        try {
-          const pid = execSync(`lsof -ti :${PORT}`, { encoding: "utf8" }).trim();
-          if (pid) {
-            for (const p of pid.split("\n")) {
-              log(`[claude-browser-bridge] Killing PID ${p}`);
-              process.kill(parseInt(p), "SIGTERM");
-            }
-          }
-        } catch { /* no process found */ }
+// --- IPC client (talks to daemon) ---
 
-        // Retry after a brief delay
-        setTimeout(() => {
-          const retry = new WebSocketServer({ port: PORT });
-          retry.on("listening", () => {
-            log(`[claude-browser-bridge] WebSocket server listening on ws://localhost:${PORT} (after retry)`);
-            resolve(retry);
-          });
-          retry.on("error", (retryErr) => reject(retryErr));
-        }, 500);
-      });
-    } else {
-      reject(err);
-    }
-  });
-});
+const pending = new Map(); // requestId → { resolve, reject, timer }
+const ipcAddress = getIpcAddress();
+let ipcSocket = null;
 
-wss.on("connection", (ws) => {
-  if (extensionSocket && extensionSocket.readyState === extensionSocket.OPEN) {
-    log("[claude-browser-bridge] New extension connection replacing existing one");
-    extensionSocket.close();
-  }
-  log("[claude-browser-bridge] Extension connected");
-  extensionSocket = ws;
-
-  ws.on("message", (raw) => {
-    let msg;
-    try {
-      msg = JSON.parse(raw.toString());
-    } catch {
-      log("[claude-browser-bridge] Bad message from extension:", raw.toString());
-      return;
-    }
-
-    const entry = pending.get(msg.id);
-    if (!entry) return;
-
-    clearTimeout(entry.timer);
-    pending.delete(msg.id);
-
-    if (msg.success) {
-      entry.resolve(msg.data);
-    } else {
-      entry.reject(new Error(msg.error || "Unknown extension error"));
-    }
-  });
-
-  ws.on("close", () => {
-    log("[claude-browser-bridge] Extension disconnected");
-    if (extensionSocket === ws) extensionSocket = null;
-
-    // Reject all pending requests — the extension that would have answered them is gone.
-    // This gives Claude an immediate error instead of waiting for individual timeouts.
-    for (const [id, entry] of pending) {
-      clearTimeout(entry.timer);
-      pending.delete(id);
-      entry.reject(new Error("Browser extension disconnected while request was in flight"));
-    }
-  });
-
-  ws.on("error", (err) => {
-    log("[claude-browser-bridge] WebSocket error:", err.message);
-  });
-
-  // keepalive ping every 20s with dead connection detection
-  let pongReceived = true;
-  ws.on("pong", () => { pongReceived = true; });
-
-  const pingInterval = setInterval(() => {
-    if (ws.readyState !== ws.OPEN) return;
-
-    if (!pongReceived) {
-      log("[claude-browser-bridge] No pong received, terminating dead connection");
-      ws.terminate();
-      return;
-    }
-
-    pongReceived = false;
-    ws.ping();
-  }, 20000);
-
-  ws.on("close", () => clearInterval(pingInterval));
-});
-
-function sendToExtension(action, params = {}, timeout = DEFAULT_TIMEOUT) {
+function connectToDaemon() {
   return new Promise((resolve, reject) => {
-    if (!extensionSocket || extensionSocket.readyState !== extensionSocket.OPEN) {
-      reject(new Error("Browser extension not connected. Load the extension in Brave and make sure the browser is running."));
-      return;
-    }
+    const socket = createConnection(ipcAddress);
 
-    const id = randomUUID();
-    const timer = setTimeout(() => {
-      pending.delete(id);
-      reject(new Error(`Request timed out after ${timeout}ms (action: ${action})`));
-    }, timeout);
+    socket.on("connect", () => {
+      log(`[browser-bridge] Connected to daemon at ${ipcAddress}`);
+      ipcSocket = socket;
+      resolve(socket);
+    });
 
-    pending.set(id, { resolve, reject, timer });
+    socket.on("data", createNdjsonParser((msg) => {
+      if (msg.type === "response") {
+        const entry = pending.get(msg.requestId);
+        if (!entry) return;
+        clearTimeout(entry.timer);
+        pending.delete(msg.requestId);
+        if (msg.success) {
+          entry.resolve(msg.data);
+        } else {
+          entry.reject(new Error(msg.error || "Unknown daemon error"));
+        }
+      } else if (msg.type === "status") {
+        log(`[browser-bridge] Extension connected: ${msg.extensionConnected}`);
+      }
+    }));
 
-    extensionSocket.send(JSON.stringify({ id, action, params }));
+    socket.on("close", () => {
+      log("[browser-bridge] Disconnected from daemon");
+      ipcSocket = null;
+      // Reject all pending requests
+      for (const [id, entry] of pending) {
+        clearTimeout(entry.timer);
+        pending.delete(id);
+        entry.reject(new Error("Daemon connection lost"));
+      }
+    });
+
+    socket.on("error", (err) => {
+      if (!ipcSocket) {
+        // Connection failed
+        reject(new Error(
+          `Cannot connect to browser-bridge daemon at ${ipcAddress}. ` +
+          `Use the daemon_start tool to start it: daemon_start("claude-browser-bridge", "node", ` +
+          `["server/daemon.js"], cwd="/path/to/claude-browser-bridge")`
+        ));
+      } else {
+        log("[browser-bridge] IPC error:", err.message);
+      }
+    });
   });
 }
 
-// --- MCP server (talks to Claude Code via stdio) ---
+function sendToDaemon(action, params = {}, timeout = DEFAULT_TIMEOUT) {
+  return new Promise((resolve, reject) => {
+    if (!ipcSocket || ipcSocket.destroyed) {
+      reject(new Error(
+        "Not connected to browser-bridge daemon. " +
+        "Use the daemon_start tool to start it."
+      ));
+      return;
+    }
+
+    const requestId = randomUUID();
+    const timer = setTimeout(() => {
+      pending.delete(requestId);
+      reject(new Error(`Request timed out after ${timeout}ms (action: ${action})`));
+    }, timeout);
+
+    pending.set(requestId, { resolve, reject, timer });
+
+    sendNdjson(ipcSocket, {
+      type: "request",
+      requestId,
+      action,
+      params,
+      timeout,
+    });
+  });
+}
+
+// --- Startup ---
+
+try {
+  await connectToDaemon();
+} catch (err) {
+  log(`[browser-bridge] ${err.message}`);
+  // Still start the MCP server so Claude gets the error message from tool calls
+  // rather than the MCP server failing to start entirely
+}
 
 const mcp = new McpServer({
   name: "claude-browser-bridge",
-  version: "1.0.0",
+  version: "2.0.0",
 });
 
-registerTools(mcp, sendToExtension);
+registerTools(mcp, sendToDaemon);
 
 const transport = new StdioServerTransport();
 await mcp.connect(transport);
 
-log("[claude-browser-bridge] MCP server connected via stdio");
+log("[browser-bridge] MCP server connected via stdio");

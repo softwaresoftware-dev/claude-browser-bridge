@@ -1,13 +1,15 @@
 {
   "name": "claude-browser-bridge",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
-  "description": "MCP bridge between Claude Code and your browser",
+  "description": "MCP bridge between Claude Code and your browser via shared daemon",
   "bin": {
-    "claude-browser-bridge": "./server/index.js"
+    "claude-browser-bridge": "./server/index.js",
+    "claude-browser-bridge-daemon": "./server/daemon.js"
   },
   "scripts": {
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "daemon": "node server/daemon.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

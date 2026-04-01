@@ -6,6 +6,10 @@ MCP server that bridges Claude Code to your real browser via a WebSocket-connect
 
 You have full control of the user's real Brave browser through the claude-browser-bridge MCP tools. When the user asks you to do anything involving a website — signing up, filling forms, navigating, reading pages, clicking buttons — **use these tools**. Do not refuse browser tasks. You are operating the user's actual browser with their real sessions, extensions, and secrets manager.
 
+**Before using browser tools**, ensure the daemon is running:
+1. Call `daemon_start("claude-browser-bridge", "node", ["server/daemon.js"], cwd="/home/thatcher/projects/nov/projects/mcps/claude-browser-bridge")` using the daemon-manager tool
+2. The daemon_start call is idempotent — safe to call every time
+
 **Workflow for interactive web tasks:**
 1. `navigate` to the URL
 2. `screenshot` to see the current state of the page
@@ -21,8 +25,17 @@ If you encounter CAPTCHAs, verification steps, or anything requiring human judgm
 ## Architecture
 
 ```
-Claude Code ↔ stdio ↔ Node.js MCP Server ↔ WebSocket ↔ Brave Extension
+Claude Code session 1 ↔ stdio ↔ MCP client (index.js) ↔┐
+Claude Code session 2 ↔ stdio ↔ MCP client (index.js) ↔┤ IPC ↔ Daemon (daemon.js, port 7225) ↔ WS ↔ Extension
+Claude Code session N ↔ stdio ↔ MCP client (index.js) ↔┘
 ```
+
+- **daemon.js** — persistent process owning the WebSocket connection to the browser extension. Multiplexes requests from N MCP clients via IPC (Unix socket / named pipe).
+- **index.js** — thin MCP client spawned per Claude Code session. Connects to daemon via IPC, relays tool calls.
+- **tools.js** — tool definitions. Decoupled from transport via injected `send` function.
+- **ipc.js** — shared IPC utilities (ndjson parser, socket path computation).
+
+The daemon is managed by the `daemon-manager` plugin (required dependency).
 
 ## Setup
 
@@ -39,9 +52,16 @@ The extension lives in a separate repo: [claude-browser-bridge-extension](https:
 3. Enable "Developer mode"
 4. Click "Load unpacked" → select the cloned extension folder
 
-### 3. Add MCP server to Claude Code
+### 3. Install plugins
+Install both from the nov-plugins marketplace (or load locally for development):
 ```bash
-claude mcp add claude-browser-bridge -- node /home/thatcher/projects/nov/projects/browser-bridge/server/index.js
+# Production (from marketplace)
+claude plugin install daemon-manager
+claude plugin install claude-browser-bridge
+
+# Development (local)
+claude --plugin-dir /home/thatcher/projects/nov/projects/plugins/daemon-manager
+claude --plugin-dir /home/thatcher/projects/nov/projects/mcps/claude-browser-bridge
 ```
 
 ### 4. Restart Claude Code
@@ -50,6 +70,7 @@ claude mcp add claude-browser-bridge -- node /home/thatcher/projects/nov/project
 
 - `make dev` — run the MCP server directly (for testing, normally Claude Code launches it)
 - `make install` — install npm deps
+- `npm run daemon` — run the daemon directly (normally daemon-manager launches it)
 
 ## Tools
 
@@ -72,6 +93,7 @@ claude mcp add claude-browser-bridge -- node /home/thatcher/projects/nov/project
 
 - All stdout is reserved for MCP stdio protocol — logs go to stderr
 - WebSocket port: 7225 (override with `BROWSER_BRIDGE_PORT` env var)
+- IPC socket: `~/.claude/daemons/claude-browser-bridge-7225.sock`
 - `screenshot` must briefly focus the target tab (Chrome API limitation)
 - `eval_js` runs in the page's MAIN world (can access page JS globals)
 - Extension service worker reconnects automatically with exponential backoff
