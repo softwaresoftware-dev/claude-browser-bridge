@@ -16,6 +16,8 @@ import { registerTools } from "./tools.js";
 import { getIpcAddress, createNdjsonParser, sendNdjson } from "./ipc.js";
 
 const DEFAULT_TIMEOUT = 30000;
+const RECONNECT_DELAY = 1000;
+const MAX_RECONNECT_DELAY = 10000;
 const log = (...args) => process.stderr.write(args.join(" ") + "\n");
 
 // --- IPC client (talks to daemon) ---
@@ -23,6 +25,8 @@ const log = (...args) => process.stderr.write(args.join(" ") + "\n");
 const pending = new Map(); // requestId → { resolve, reject, timer }
 const ipcAddress = getIpcAddress();
 let ipcSocket = null;
+let reconnecting = false;
+let reconnectDelay = RECONNECT_DELAY;
 
 function connectToDaemon() {
   return new Promise((resolve, reject) => {
@@ -31,6 +35,7 @@ function connectToDaemon() {
     socket.on("connect", () => {
       log(`[browser-bridge] Connected to daemon at ${ipcAddress}`);
       ipcSocket = socket;
+      reconnectDelay = RECONNECT_DELAY;
       resolve(socket);
     });
 
@@ -53,22 +58,17 @@ function connectToDaemon() {
     socket.on("close", () => {
       log("[browser-bridge] Disconnected from daemon");
       ipcSocket = null;
-      // Reject all pending requests
       for (const [id, entry] of pending) {
         clearTimeout(entry.timer);
         pending.delete(id);
         entry.reject(new Error("Daemon connection lost"));
       }
+      scheduleReconnect();
     });
 
     socket.on("error", (err) => {
       if (!ipcSocket) {
-        // Connection failed
-        reject(new Error(
-          `Cannot connect to browser-bridge daemon at ${ipcAddress}. ` +
-          `Use the daemon_start tool to start it: daemon_start("claude-browser-bridge", "node", ` +
-          `["server/daemon.js"], cwd="/path/to/claude-browser-bridge")`
-        ));
+        reject(new Error(`Cannot connect to daemon at ${ipcAddress}`));
       } else {
         log("[browser-bridge] IPC error:", err.message);
       }
@@ -76,13 +76,40 @@ function connectToDaemon() {
   });
 }
 
+function scheduleReconnect() {
+  if (reconnecting) return;
+  reconnecting = true;
+  log(`[browser-bridge] Reconnecting in ${reconnectDelay}ms...`);
+  setTimeout(async () => {
+    reconnecting = false;
+    try {
+      await connectToDaemon();
+    } catch {
+      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+      scheduleReconnect();
+    }
+  }, reconnectDelay);
+}
+
+async function ensureConnected() {
+  if (ipcSocket && !ipcSocket.destroyed) return;
+  // Try one immediate connect attempt
+  try {
+    await connectToDaemon();
+  } catch {
+    throw new Error(
+      "Not connected to browser-bridge daemon. " +
+      "Use the daemon_start tool to start it, then retry."
+    );
+  }
+}
+
 function sendToDaemon(action, params = {}, timeout = DEFAULT_TIMEOUT) {
-  return new Promise((resolve, reject) => {
-    if (!ipcSocket || ipcSocket.destroyed) {
-      reject(new Error(
-        "Not connected to browser-bridge daemon. " +
-        "Use the daemon_start tool to start it."
-      ));
+  return new Promise(async (resolve, reject) => {
+    try {
+      await ensureConnected();
+    } catch (err) {
+      reject(err);
       return;
     }
 
@@ -108,10 +135,8 @@ function sendToDaemon(action, params = {}, timeout = DEFAULT_TIMEOUT) {
 
 try {
   await connectToDaemon();
-} catch (err) {
-  log(`[browser-bridge] ${err.message}`);
-  // Still start the MCP server so Claude gets the error message from tool calls
-  // rather than the MCP server failing to start entirely
+} catch {
+  log("[browser-bridge] Daemon not running — will connect when available");
 }
 
 const mcp = new McpServer({

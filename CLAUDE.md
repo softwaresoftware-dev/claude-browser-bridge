@@ -93,7 +93,7 @@ claude --plugin-dir /home/thatcher/projects/nov/projects/mcps/claude-browser-bri
 
 - All stdout is reserved for MCP stdio protocol — logs go to stderr
 - WebSocket port: 7225 (override with `BROWSER_BRIDGE_PORT` env var)
-- IPC socket: `~/.claude/daemons/claude-browser-bridge-7225.sock`
+- IPC socket: `~/.claude/daemons/claude-browser-bridge.sock`
 - `screenshot` must briefly focus the target tab (Chrome API limitation)
 - `eval_js` runs in the page's MAIN world (can access page JS globals)
 - Extension service worker reconnects automatically with exponential backoff

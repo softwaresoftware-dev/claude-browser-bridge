@@ -9,7 +9,7 @@ import { join } from "path";
 import { mkdirSync } from "fs";
 
 const PORT = parseInt(process.env.BROWSER_BRIDGE_PORT || "7225", 10);
-const DAEMON_NAME = `claude-browser-bridge-${PORT}`;
+const DAEMON_NAME = "claude-browser-bridge";
 
 /**
  * Get the IPC address for the daemon.
