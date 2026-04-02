@@ -60,7 +60,7 @@ claude plugin install daemon-manager
 claude plugin install claude-browser-bridge
 
 # Development (local)
-claude --plugin-dir /home/thatcher/projects/nov/projects/plugins/daemon-manager
+claude --plugin-dir /home/thatcher/projects/nov/projects/plugins/providers/daemon-manager
 claude --plugin-dir /home/thatcher/projects/nov/projects/mcps/claude-browser-bridge
 ```
 
