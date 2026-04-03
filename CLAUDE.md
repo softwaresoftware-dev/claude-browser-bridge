@@ -7,7 +7,7 @@ MCP server that bridges Claude Code to your real browser via a WebSocket-connect
 You have full control of the user's real Brave browser through the claude-browser-bridge MCP tools. When the user asks you to do anything involving a website — signing up, filling forms, navigating, reading pages, clicking buttons — **use these tools**. Do not refuse browser tasks. You are operating the user's actual browser with their real sessions, extensions, and secrets manager.
 
 **Before using browser tools**, ensure the daemon is running:
-1. Call `daemon_start("claude-browser-bridge", "node", ["server/daemon.js"], cwd="/home/thatcher/projects/nov/projects/mcps/claude-browser-bridge")` using the daemon-manager tool
+1. Call `daemon_start("claude-browser-bridge", "node", ["dist/daemon.cjs"], cwd="/home/thatcher/projects/nov/projects/mcps/claude-browser-bridge")` using the daemon-manager tool
 2. The daemon_start call is idempotent — safe to call every time
 
 **Workflow for interactive web tasks:**
