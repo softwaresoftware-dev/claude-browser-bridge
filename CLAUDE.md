@@ -105,6 +105,10 @@ When working in this repo, you can edit and test daemon code without restarting 
 | `wait_for` | Wait for selector to appear |
 | `scroll` | Scroll page or element |
 
+## TODO
+
+- **Multi-session tab isolation**: when multiple Claude sessions use browser-bridge concurrently, they can hijack each other's tabs. Each session should own a tab group (or similar isolation boundary) so sessions don't stomp on each other. The official Claude browser connector plugin solves this with tab groups — investigate that approach.
+
 ## Notes
 
 - All stdout is reserved for MCP stdio protocol — logs go to stderr
