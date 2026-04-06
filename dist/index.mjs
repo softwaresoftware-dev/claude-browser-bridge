@@ -19187,21 +19187,21 @@ var Protocol = class {
    * the error appropriately (e.g., by failing the task, logging, etc.). The Protocol layer
    * simply propagates the error.
    */
-  async _enqueueTaskMessage(taskId, message, sessionId) {
+  async _enqueueTaskMessage(taskId, message, sessionId2) {
     if (!this._taskStore || !this._taskMessageQueue) {
       throw new Error("Cannot enqueue task message: taskStore and taskMessageQueue are not configured");
     }
     const maxQueueSize = this._options?.maxTaskQueueSize;
-    await this._taskMessageQueue.enqueue(taskId, message, sessionId, maxQueueSize);
+    await this._taskMessageQueue.enqueue(taskId, message, sessionId2, maxQueueSize);
   }
   /**
    * Clears the message queue for a task and rejects any pending request resolvers.
    * @param taskId The task ID whose queue should be cleared
    * @param sessionId Optional session ID for binding the operation to a specific session
    */
-  async _clearTaskQueue(taskId, sessionId) {
+  async _clearTaskQueue(taskId, sessionId2) {
     if (this._taskMessageQueue) {
-      const messages = await this._taskMessageQueue.dequeueAll(taskId, sessionId);
+      const messages = await this._taskMessageQueue.dequeueAll(taskId, sessionId2);
       for (const message of messages) {
         if (message.type === "request" && isJSONRPCRequest(message.message)) {
           const requestId = message.message.id;
@@ -19244,7 +19244,7 @@ var Protocol = class {
       }, { once: true });
     });
   }
-  requestTaskStore(request, sessionId) {
+  requestTaskStore(request, sessionId2) {
     const taskStore = this._taskStore;
     if (!taskStore) {
       throw new Error("No task store configured");
@@ -19257,18 +19257,18 @@ var Protocol = class {
         return await taskStore.createTask(taskParams, request.id, {
           method: request.method,
           params: request.params
-        }, sessionId);
+        }, sessionId2);
       },
       getTask: async (taskId) => {
-        const task = await taskStore.getTask(taskId, sessionId);
+        const task = await taskStore.getTask(taskId, sessionId2);
         if (!task) {
           throw new McpError(ErrorCode.InvalidParams, "Failed to retrieve task: Task not found");
         }
         return task;
       },
       storeTaskResult: async (taskId, status, result) => {
-        await taskStore.storeTaskResult(taskId, status, result, sessionId);
-        const task = await taskStore.getTask(taskId, sessionId);
+        await taskStore.storeTaskResult(taskId, status, result, sessionId2);
+        const task = await taskStore.getTask(taskId, sessionId2);
         if (task) {
           const notification = TaskStatusNotificationSchema.parse({
             method: "notifications/tasks/status",
@@ -19281,18 +19281,18 @@ var Protocol = class {
         }
       },
       getTaskResult: (taskId) => {
-        return taskStore.getTaskResult(taskId, sessionId);
+        return taskStore.getTaskResult(taskId, sessionId2);
       },
       updateTaskStatus: async (taskId, status, statusMessage) => {
-        const task = await taskStore.getTask(taskId, sessionId);
+        const task = await taskStore.getTask(taskId, sessionId2);
         if (!task) {
           throw new McpError(ErrorCode.InvalidParams, `Task "${taskId}" not found - it may have been cleaned up`);
         }
         if (isTerminal(task.status)) {
           throw new McpError(ErrorCode.InvalidParams, `Cannot update task "${taskId}" from terminal status "${task.status}" to "${status}". Terminal states (completed, failed, cancelled) cannot transition to other states.`);
         }
-        await taskStore.updateTaskStatus(taskId, status, statusMessage, sessionId);
-        const updatedTask = await taskStore.getTask(taskId, sessionId);
+        await taskStore.updateTaskStatus(taskId, status, statusMessage, sessionId2);
+        const updatedTask = await taskStore.getTask(taskId, sessionId2);
         if (updatedTask) {
           const notification = TaskStatusNotificationSchema.parse({
             method: "notifications/tasks/status",
@@ -19305,7 +19305,7 @@ var Protocol = class {
         }
       },
       listTasks: (cursor) => {
-        return taskStore.listTasks(cursor, sessionId);
+        return taskStore.listTasks(cursor, sessionId2);
       }
     };
   }
@@ -19656,8 +19656,8 @@ var Server = class extends Protocol {
     this._serverInfo = _serverInfo;
     this._loggingLevels = /* @__PURE__ */ new Map();
     this.LOG_LEVEL_SEVERITY = new Map(LoggingLevelSchema.options.map((level, index) => [level, index]));
-    this.isMessageIgnored = (level, sessionId) => {
-      const currentLevel = this._loggingLevels.get(sessionId);
+    this.isMessageIgnored = (level, sessionId2) => {
+      const currentLevel = this._loggingLevels.get(sessionId2);
       return currentLevel ? this.LOG_LEVEL_SEVERITY.get(level) < this.LOG_LEVEL_SEVERITY.get(currentLevel) : false;
     };
     this._capabilities = options?.capabilities ?? {};
@@ -20000,9 +20000,9 @@ var Server = class extends Protocol {
    * @param params
    * @param sessionId optional for stateless and backward compatibility
    */
-  async sendLoggingMessage(params, sessionId) {
+  async sendLoggingMessage(params, sessionId2) {
     if (this._capabilities.logging) {
-      if (!this.isMessageIgnored(params.level, sessionId)) {
+      if (!this.isMessageIgnored(params.level, sessionId2)) {
         return this.notification({ method: "notifications/message", params });
       }
     }
@@ -20801,8 +20801,8 @@ var McpServer = class {
    * @param params
    * @param sessionId optional for stateless and backward compatibility
    */
-  async sendLoggingMessage(params, sessionId) {
-    return this.server.sendLoggingMessage(params, sessionId);
+  async sendLoggingMessage(params, sessionId2) {
+    return this.server.sendLoggingMessage(params, sessionId2);
   }
   /**
    * Sends a resource list changed event to the client, if connected.
@@ -21005,10 +21005,12 @@ import { randomUUID } from "crypto";
 function registerTools(server, send) {
   server.tool(
     "list_tabs",
-    "List all open browser tabs",
-    {},
-    async () => {
-      const tabs = await send("list_tabs");
+    "List open browser tabs (scoped to this session's tab group by default)",
+    {
+      all_tabs: external_exports.boolean().optional().describe("Show all tabs across all sessions, not just this session's group")
+    },
+    async ({ all_tabs }) => {
+      const tabs = await send("list_tabs", { all_tabs });
       return { content: [{ type: "text", text: JSON.stringify(tabs, null, 2) }] };
     }
   );
@@ -21197,6 +21199,7 @@ var DEFAULT_TIMEOUT = 3e4;
 var RECONNECT_DELAY = 1e3;
 var MAX_RECONNECT_DELAY = 1e4;
 var log = (...args) => process.stderr.write(args.join(" ") + "\n");
+var sessionId = randomUUID().slice(0, 8);
 var pending = /* @__PURE__ */ new Map();
 var ipcAddress = getIpcAddress();
 var ipcSocket = null;
@@ -21206,9 +21209,10 @@ function connectToDaemon() {
   return new Promise((resolve, reject) => {
     const socket = createConnection(ipcAddress);
     socket.on("connect", () => {
-      log(`[browser-bridge] Connected to daemon at ${ipcAddress}`);
+      log(`[browser-bridge] Connected to daemon at ${ipcAddress} (session ${sessionId})`);
       ipcSocket = socket;
       reconnectDelay = RECONNECT_DELAY;
+      sendNdjson(socket, { type: "hello", sessionId });
       resolve(socket);
     });
     socket.on("data", createNdjsonParser((msg) => {

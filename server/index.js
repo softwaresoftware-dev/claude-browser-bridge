@@ -19,6 +19,7 @@ const DEFAULT_TIMEOUT = 30000;
 const RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 10000;
 const log = (...args) => process.stderr.write(args.join(" ") + "\n");
+const sessionId = randomUUID().slice(0, 8);
 
 // --- IPC client (talks to daemon) ---
 
@@ -33,9 +34,10 @@ function connectToDaemon() {
     const socket = createConnection(ipcAddress);
 
     socket.on("connect", () => {
-      log(`[browser-bridge] Connected to daemon at ${ipcAddress}`);
+      log(`[browser-bridge] Connected to daemon at ${ipcAddress} (session ${sessionId})`);
       ipcSocket = socket;
       reconnectDelay = RECONNECT_DELAY;
+      sendNdjson(socket, { type: "hello", sessionId });
       resolve(socket);
     });
 

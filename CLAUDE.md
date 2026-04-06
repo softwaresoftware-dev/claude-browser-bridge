@@ -57,7 +57,7 @@ The extension lives in a separate repo: [claude-browser-bridge-extension](https:
 4. Click "Load unpacked" → select the cloned extension folder
 
 ### 3. Install plugins
-Install both from the nov-plugins marketplace (or load locally for development):
+Install both from the softwaresoftware-plugins marketplace (or load locally for development):
 ```bash
 # Production (from marketplace)
 claude plugin install daemon-manager
@@ -105,9 +105,15 @@ When working in this repo, you can edit and test daemon code without restarting 
 | `wait_for` | Wait for selector to appear |
 | `scroll` | Scroll page or element |
 
-## TODO
+## Multi-Session Tab Isolation
 
-- **Multi-session tab isolation**: when multiple Claude sessions use browser-bridge concurrently, they can hijack each other's tabs. Each session should own a tab group (or similar isolation boundary) so sessions don't stomp on each other. The official Claude browser connector plugin solves this with tab groups — investigate that approach.
+Each MCP client process generates a session ID on startup and sends it to the daemon via a `hello` message. The daemon injects this `sessionId` into every request forwarded to the browser extension.
+
+The extension maps each session to a Chrome tab group (colored and labeled `Session <id>`). When no explicit `tab_id` is provided, `resolveTabId` scopes to the session's group — preferring the active tab within the group, then falling back to the most recently accessed tab. The `list_tabs` tool also filters by the session's group by default (pass `all_tabs: true` to see everything).
+
+When a session disconnects, the daemon sends a `session_end` message. The extension collapses the tab group and marks it as ended, preserving tabs for the user.
+
+Session group state is persisted to `chrome.storage.session` so it survives service worker restarts.
 
 ## Notes
 

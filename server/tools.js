@@ -3,10 +3,12 @@ import { z } from "zod";
 export function registerTools(server, send) {
   server.tool(
     "list_tabs",
-    "List all open browser tabs",
-    {},
-    async () => {
-      const tabs = await send("list_tabs");
+    "List open browser tabs (scoped to this session's tab group by default)",
+    {
+      all_tabs: z.boolean().optional().describe("Show all tabs across all sessions, not just this session's group"),
+    },
+    async ({ all_tabs }) => {
+      const tabs = await send("list_tabs", { all_tabs });
       return { content: [{ type: "text", text: JSON.stringify(tabs, null, 2) }] };
     }
   );

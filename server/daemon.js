@@ -20,7 +20,7 @@ const log = (...args) => process.stderr.write(args.join(" ") + "\n");
 // --- State ---
 let extensionSocket = null;
 const pending = new Map(); // requestId → { clientSocket, timer }
-const clients = new Set(); // connected IPC client sockets
+const clients = new Map(); // socket → { sessionId }
 
 // --- WebSocket server (talks to browser extension) ---
 // Use an HTTP server to handle Private Network Access (PNA) preflight requests.
@@ -141,7 +141,7 @@ if (existsSync(ipcAddress) && !ipcAddress.startsWith("\\\\.\\pipe\\")) {
 
 const ipcServer = createNetServer((socket) => {
   log("[daemon] IPC client connected");
-  clients.add(socket);
+  clients.set(socket, { sessionId: null });
 
   // Send initial status
   sendNdjson(socket, {
@@ -150,6 +150,12 @@ const ipcServer = createNetServer((socket) => {
   });
 
   const onMessage = (msg) => {
+    if (msg.type === "hello") {
+      clients.set(socket, { sessionId: msg.sessionId });
+      log(`[daemon] IPC client identified as session ${msg.sessionId}`);
+      return;
+    }
+
     if (msg.type !== "request") return;
 
     const { requestId, action, params, timeout } = msg;
@@ -179,14 +185,22 @@ const ipcServer = createNetServer((socket) => {
     // Store with the extension ID as key, but include the client's requestId for response routing
     pending.set(extId, { clientSocket: socket, timer, clientRequestId: requestId });
 
-    extensionSocket.send(JSON.stringify({ id: extId, action, params }));
+    const clientInfo = clients.get(socket);
+    extensionSocket.send(JSON.stringify({ id: extId, action, params, sessionId: clientInfo?.sessionId }));
   };
 
   socket.on("data", createNdjsonParser(onMessage));
 
   socket.on("close", () => {
-    log("[daemon] IPC client disconnected");
+    const clientInfo = clients.get(socket);
+    const sid = clientInfo?.sessionId;
+    log(`[daemon] IPC client disconnected (session ${sid || "unknown"})`);
     clients.delete(socket);
+
+    // Notify extension so it can mark the tab group as ended
+    if (sid && extensionSocket && extensionSocket.readyState === extensionSocket.OPEN) {
+      extensionSocket.send(JSON.stringify({ type: "session_end", sessionId: sid }));
+    }
 
     // Clean up pending requests from this client
     for (const [id, entry] of pending) {
@@ -218,7 +232,7 @@ function broadcastStatus() {
     type: "status",
     extensionConnected: !!(extensionSocket && extensionSocket.readyState === extensionSocket.OPEN),
   };
-  for (const client of clients) {
+  for (const [client] of clients) {
     sendNdjson(client, status);
   }
 }
