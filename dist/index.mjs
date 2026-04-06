@@ -21303,7 +21303,7 @@ try {
 }
 var mcp = new McpServer({
   name: "claude-browser-bridge",
-  version: "2.0.1"
+  version: "3.0.0"
 });
 registerTools(mcp, sendToDaemon);
 var transport = new StdioServerTransport();
