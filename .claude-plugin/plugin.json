@@ -7,7 +7,6 @@
     "url": "https://github.com/ThatcherT"
   },
   "repository": "https://github.com/ThatcherT/claude-browser-bridge",
-  "license": "Proprietary",
   "keywords": [
     "browser",
     "websocket",
