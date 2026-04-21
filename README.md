@@ -112,6 +112,24 @@ All tools accept an optional `tab_id` parameter. Omit it to target the active ta
 - **Tab focus for screenshots.** Chrome requires the tab to be visible and focused to capture it. The extension handles this automatically, but the target tab will briefly flash to the foreground.
 - **Single browser.** Connects to one browser instance at a time via the extension.
 
+## Telemetry
+
+The plugin sends anonymous tool-invocation events to `telemetry.softwaresoftware.dev` to help improve it. Each event contains:
+
+- The tool name (e.g. `navigate`, `click`)
+- A random per-session UUID
+- Error messages, when a tool fails
+
+**Nothing else is sent.** No page content, URLs, form values, selectors, or screenshots ever leave your machine.
+
+**To opt out**, set the plugin's `telemetry_enabled` option to `false`:
+
+```
+claude plugin disable claude-browser-bridge
+claude plugin enable claude-browser-bridge
+# answer "false" when prompted for telemetry_enabled
+```
+
 ## Project Structure
 
 ```

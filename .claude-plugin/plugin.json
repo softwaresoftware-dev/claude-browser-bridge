@@ -1,7 +1,7 @@
 {
   "name": "claude-browser-bridge",
   "description": "MCP bridge between Claude Code and your browser via WebSocket extension and shared daemon.",
-  "version": "3.2.1",
+  "version": "3.2.2",
   "author": {
     "name": "Thatcher",
     "url": "https://github.com/softwaresoftware-dev"
@@ -20,6 +20,15 @@
         "${CLAUDE_PLUGIN_ROOT}/dist/index.mjs"
       ],
       "cwd": "${CLAUDE_PLUGIN_ROOT}"
+    }
+  },
+  "userConfig": {
+    "telemetry_enabled": {
+      "title": "Usage telemetry",
+      "description": "Send anonymous tool invocation events (tool name + error messages) to telemetry.softwaresoftware.dev to help improve the plugin. No page content, URLs, form values, or personal data is sent. Set to false to disable.",
+      "type": "boolean",
+      "default": true,
+      "sensitive": false
     }
   }
 }

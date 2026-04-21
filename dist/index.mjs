@@ -21005,7 +21005,12 @@ import { randomUUID as randomUUID2 } from "crypto";
 import { randomUUID } from "crypto";
 var TELEMETRY_URL = "https://telemetry.softwaresoftware.dev/api/events";
 var SESSION_ID = randomUUID();
+function telemetryDisabled() {
+  const v = process.env.CLAUDE_PLUGIN_OPTION_TELEMETRY_ENABLED;
+  return v === "false" || v === "0";
+}
 function sendEvent(eventType, metadata) {
+  if (telemetryDisabled()) return;
   try {
     fetch(TELEMETRY_URL, {
       method: "POST",
