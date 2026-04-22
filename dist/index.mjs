@@ -21298,11 +21298,33 @@ function sendNdjson(socket, obj) {
   socket.write(JSON.stringify(obj) + "\n");
 }
 
+// server/logger.js
+var LEVELS = { debug: 10, info: 20, warn: 30, error: 40, silent: 99 };
+function parseLevel(raw) {
+  if (raw == null) return LEVELS.info;
+  const key = String(raw).trim().toLowerCase();
+  return LEVELS[key] ?? LEVELS.info;
+}
+var activeLevel = parseLevel(process.env.CLAUDE_PLUGIN_OPTION_LOG_LEVEL);
+function emit(levelName, component, args) {
+  if (LEVELS[levelName] < activeLevel) return;
+  process.stderr.write(`[${levelName}] [${component}] ${args.join(" ")}
+`);
+}
+function createLogger(component) {
+  return {
+    debug: (...args) => emit("debug", component, args),
+    info: (...args) => emit("info", component, args),
+    warn: (...args) => emit("warn", component, args),
+    error: (...args) => emit("error", component, args)
+  };
+}
+
 // server/index.js
 var DEFAULT_TIMEOUT = 3e4;
 var RECONNECT_DELAY = 1e3;
 var MAX_RECONNECT_DELAY = 1e4;
-var log = (...args) => process.stderr.write(args.join(" ") + "\n");
+var log = createLogger("browser-bridge");
 var sessionId = randomUUID2().slice(0, 8);
 var pending = /* @__PURE__ */ new Map();
 var ipcAddress = getIpcAddress();
@@ -21314,7 +21336,7 @@ function connectToDaemon() {
   return new Promise((resolve, reject) => {
     const socket = createConnection(ipcAddress);
     socket.on("connect", () => {
-      log(`[browser-bridge] Connected to daemon at ${ipcAddress} (session ${sessionId})`);
+      log.info(`Connected to daemon at ${ipcAddress} (session ${sessionId})`);
       ipcSocket = socket;
       reconnectDelay = RECONNECT_DELAY;
       sendNdjson(socket, { type: "hello", sessionId });
@@ -21333,15 +21355,15 @@ function connectToDaemon() {
           entry.reject(new Error(msg.error || "Unknown daemon error"));
         }
       } else if (msg.type === "status") {
-        log(`[browser-bridge] Extension connected: ${msg.extensionConnected}`);
+        log.info(`Extension connected: ${msg.extensionConnected}`);
         if (msg.extensionVersionWarning) {
           extensionVersionWarning = msg.extensionVersionWarning;
-          log(`[browser-bridge] ${msg.extensionVersionWarning}`);
+          log.warn(msg.extensionVersionWarning);
         }
       }
     }));
     socket.on("close", () => {
-      log("[browser-bridge] Disconnected from daemon");
+      log.warn("Disconnected from daemon");
       ipcSocket = null;
       for (const [id, entry] of pending) {
         clearTimeout(entry.timer);
@@ -21354,7 +21376,7 @@ function connectToDaemon() {
       if (!ipcSocket) {
         reject(new Error(`Cannot connect to daemon at ${ipcAddress}`));
       } else {
-        log("[browser-bridge] IPC error:", err.message);
+        log.error("IPC error:", err.message);
       }
     });
   });
@@ -21362,7 +21384,7 @@ function connectToDaemon() {
 function scheduleReconnect() {
   if (reconnecting) return;
   reconnecting = true;
-  log(`[browser-bridge] Reconnecting in ${reconnectDelay}ms...`);
+  log.debug(`Reconnecting in ${reconnectDelay}ms...`);
   setTimeout(async () => {
     reconnecting = false;
     try {
@@ -21409,7 +21431,7 @@ function sendToDaemon(action, params = {}, timeout = DEFAULT_TIMEOUT) {
 try {
   await connectToDaemon();
 } catch {
-  log("[browser-bridge] Daemon not running \u2014 will connect when available");
+  log.info("Daemon not running \u2014 will connect when available");
 }
 var mcp = new McpServer({
   name: "claude-browser-bridge",
@@ -21418,4 +21440,4 @@ var mcp = new McpServer({
 registerTools(mcp, sendToDaemon, () => extensionVersionWarning);
 var transport = new StdioServerTransport();
 await mcp.connect(transport);
-log("[browser-bridge] MCP server connected via stdio");
+log.info("MCP server connected via stdio");

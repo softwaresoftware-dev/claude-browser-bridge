@@ -3695,8 +3695,30 @@ function sendNdjson(socket, obj) {
   socket.write(JSON.stringify(obj) + "\n");
 }
 
+// server/logger.js
+var LEVELS = { debug: 10, info: 20, warn: 30, error: 40, silent: 99 };
+function parseLevel(raw) {
+  if (raw == null) return LEVELS.info;
+  const key = String(raw).trim().toLowerCase();
+  return LEVELS[key] ?? LEVELS.info;
+}
+var activeLevel = parseLevel(process.env.CLAUDE_PLUGIN_OPTION_LOG_LEVEL);
+function emit(levelName, component, args) {
+  if (LEVELS[levelName] < activeLevel) return;
+  process.stderr.write(`[${levelName}] [${component}] ${args.join(" ")}
+`);
+}
+function createLogger(component) {
+  return {
+    debug: (...args) => emit("debug", component, args),
+    info: (...args) => emit("info", component, args),
+    warn: (...args) => emit("warn", component, args),
+    error: (...args) => emit("error", component, args)
+  };
+}
+
 // server/daemon.js
-var log = (...args) => process.stderr.write(args.join(" ") + "\n");
+var log = createLogger("daemon");
 var extensionSocket = null;
 var extensionVersionWarning = null;
 var pending = /* @__PURE__ */ new Map();
@@ -3706,9 +3728,9 @@ try {
   const manifestPath = (0, import_path2.join)(process.cwd(), "extension", "manifest.json");
   const manifest = JSON.parse((0, import_fs2.readFileSync)(manifestPath, "utf-8"));
   expectedExtensionVersion = manifest.version;
-  log(`[daemon] Expected extension version: ${expectedExtensionVersion}`);
+  log.info(`Expected extension version: ${expectedExtensionVersion}`);
 } catch {
-  log("[daemon] Could not read bundled extension manifest \u2014 version check disabled");
+  log.warn("Could not read bundled extension manifest \u2014 version check disabled");
 }
 var httpServer = (0, import_http.createServer)((req, res) => {
   if (req.method === "OPTIONS") {
@@ -3726,18 +3748,18 @@ var httpServer = (0, import_http.createServer)((req, res) => {
 });
 var wss = new import_websocket_server.default({ server: httpServer });
 httpServer.listen(PORT, "127.0.0.1", () => {
-  log(`[daemon] WebSocket server listening on ws://127.0.0.1:${PORT}`);
+  log.info(`WebSocket server listening on ws://127.0.0.1:${PORT}`);
 });
 httpServer.on("error", (err) => {
-  log(`[daemon] HTTP/WebSocket server error: ${err.message}`);
+  log.error(`HTTP/WebSocket server error: ${err.message}`);
   process.exit(1);
 });
 wss.on("connection", (ws) => {
   if (extensionSocket && extensionSocket.readyState === extensionSocket.OPEN) {
-    log("[daemon] New extension connection replacing existing one");
+    log.info("New extension connection replacing existing one");
     extensionSocket.close();
   }
-  log("[daemon] Extension connected");
+  log.info("Extension connected");
   extensionSocket = ws;
   extensionVersionWarning = null;
   if (expectedExtensionVersion) {
@@ -3749,17 +3771,17 @@ wss.on("connection", (ws) => {
     try {
       msg = JSON.parse(raw.toString());
     } catch {
-      log("[daemon] Bad message from extension:", raw.toString());
+      log.warn("Bad message from extension:", raw.toString());
       return;
     }
     if (msg.type === "version_report") {
       if (msg.outdated) {
         extensionVersionWarning = `Browser extension is v${msg.currentVersion} but v${msg.expectedVersion} is available. Reload the extension from your browser's extensions page (the updated code is at the same path).`;
-        log(`[daemon] Extension version mismatch: loaded=${msg.currentVersion}, expected=${msg.expectedVersion}`);
+        log.warn(`Extension version mismatch: loaded=${msg.currentVersion}, expected=${msg.expectedVersion}`);
         broadcastStatus();
       } else {
         extensionVersionWarning = null;
-        log(`[daemon] Extension version OK: ${msg.currentVersion}`);
+        log.info(`Extension version OK: ${msg.currentVersion}`);
       }
       return;
     }
@@ -3776,7 +3798,7 @@ wss.on("connection", (ws) => {
     });
   });
   ws.on("close", () => {
-    log("[daemon] Extension disconnected");
+    log.warn("Extension disconnected");
     if (extensionSocket === ws) extensionSocket = null;
     for (const [id, entry] of pending) {
       clearTimeout(entry.timer);
@@ -3791,7 +3813,7 @@ wss.on("connection", (ws) => {
     broadcastStatus();
   });
   ws.on("error", (err) => {
-    log("[daemon] WebSocket error:", err.message);
+    log.error("WebSocket error:", err.message);
   });
   let pongReceived = true;
   ws.on("pong", () => {
@@ -3800,7 +3822,7 @@ wss.on("connection", (ws) => {
   const pingInterval = setInterval(() => {
     if (ws.readyState !== ws.OPEN) return;
     if (!pongReceived) {
-      log("[daemon] No pong received, terminating dead connection");
+      log.warn("No pong received, terminating dead connection");
       ws.terminate();
       return;
     }
@@ -3814,7 +3836,7 @@ if ((0, import_fs2.existsSync)(ipcAddress) && !ipcAddress.startsWith("\\\\.\\pip
   (0, import_fs2.unlinkSync)(ipcAddress);
 }
 var ipcServer = (0, import_net.createServer)((socket) => {
-  log("[daemon] IPC client connected");
+  log.debug("IPC client connected");
   clients.set(socket, { sessionId: null });
   sendNdjson(socket, {
     type: "status",
@@ -3823,7 +3845,7 @@ var ipcServer = (0, import_net.createServer)((socket) => {
   const onMessage = (msg) => {
     if (msg.type === "hello") {
       clients.set(socket, { sessionId: msg.sessionId });
-      log(`[daemon] IPC client identified as session ${msg.sessionId}`);
+      log.info(`IPC client identified as session ${msg.sessionId}`);
       return;
     }
     if (msg.type !== "request") return;
@@ -3855,7 +3877,7 @@ var ipcServer = (0, import_net.createServer)((socket) => {
   socket.on("close", () => {
     const clientInfo = clients.get(socket);
     const sid = clientInfo?.sessionId;
-    log(`[daemon] IPC client disconnected (session ${sid || "unknown"})`);
+    log.debug(`IPC client disconnected (session ${sid || "unknown"})`);
     clients.delete(socket);
     if (sid && extensionSocket && extensionSocket.readyState === extensionSocket.OPEN) {
       extensionSocket.send(JSON.stringify({ type: "session_end", sessionId: sid }));
@@ -3868,14 +3890,14 @@ var ipcServer = (0, import_net.createServer)((socket) => {
     }
   });
   socket.on("error", (err) => {
-    log("[daemon] IPC client error:", err.message);
+    log.error("IPC client error:", err.message);
   });
 });
 ipcServer.listen(ipcAddress, () => {
-  log(`[daemon] IPC server listening on ${ipcAddress}`);
+  log.info(`IPC server listening on ${ipcAddress}`);
 });
 ipcServer.on("error", (err) => {
-  log(`[daemon] IPC server error: ${err.message}`);
+  log.error(`IPC server error: ${err.message}`);
   process.exit(1);
 });
 function broadcastStatus() {
@@ -3889,7 +3911,7 @@ function broadcastStatus() {
   }
 }
 function cleanup() {
-  log("[daemon] Shutting down...");
+  log.info("Shutting down...");
   ipcServer.close();
   if (!ipcAddress.startsWith("\\\\.\\pipe\\")) {
     try {

@@ -14,11 +14,12 @@ import { createConnection } from "net";
 import { randomUUID } from "crypto";
 import { registerTools } from "./tools.js";
 import { getIpcAddress, createNdjsonParser, sendNdjson } from "./ipc.js";
+import { createLogger } from "./logger.js";
 
 const DEFAULT_TIMEOUT = 30000;
 const RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 10000;
-const log = (...args) => process.stderr.write(args.join(" ") + "\n");
+const log = createLogger("browser-bridge");
 const sessionId = randomUUID().slice(0, 8);
 
 // --- IPC client (talks to daemon) ---
@@ -35,7 +36,7 @@ function connectToDaemon() {
     const socket = createConnection(ipcAddress);
 
     socket.on("connect", () => {
-      log(`[browser-bridge] Connected to daemon at ${ipcAddress} (session ${sessionId})`);
+      log.info(`Connected to daemon at ${ipcAddress} (session ${sessionId})`);
       ipcSocket = socket;
       reconnectDelay = RECONNECT_DELAY;
       sendNdjson(socket, { type: "hello", sessionId });
@@ -55,16 +56,16 @@ function connectToDaemon() {
           entry.reject(new Error(msg.error || "Unknown daemon error"));
         }
       } else if (msg.type === "status") {
-        log(`[browser-bridge] Extension connected: ${msg.extensionConnected}`);
+        log.info(`Extension connected: ${msg.extensionConnected}`);
         if (msg.extensionVersionWarning) {
           extensionVersionWarning = msg.extensionVersionWarning;
-          log(`[browser-bridge] ${msg.extensionVersionWarning}`);
+          log.warn(msg.extensionVersionWarning);
         }
       }
     }));
 
     socket.on("close", () => {
-      log("[browser-bridge] Disconnected from daemon");
+      log.warn("Disconnected from daemon");
       ipcSocket = null;
       for (const [id, entry] of pending) {
         clearTimeout(entry.timer);
@@ -78,7 +79,7 @@ function connectToDaemon() {
       if (!ipcSocket) {
         reject(new Error(`Cannot connect to daemon at ${ipcAddress}`));
       } else {
-        log("[browser-bridge] IPC error:", err.message);
+        log.error("IPC error:", err.message);
       }
     });
   });
@@ -87,7 +88,7 @@ function connectToDaemon() {
 function scheduleReconnect() {
   if (reconnecting) return;
   reconnecting = true;
-  log(`[browser-bridge] Reconnecting in ${reconnectDelay}ms...`);
+  log.debug(`Reconnecting in ${reconnectDelay}ms...`);
   setTimeout(async () => {
     reconnecting = false;
     try {
@@ -144,7 +145,7 @@ function sendToDaemon(action, params = {}, timeout = DEFAULT_TIMEOUT) {
 try {
   await connectToDaemon();
 } catch {
-  log("[browser-bridge] Daemon not running — will connect when available");
+  log.info("Daemon not running — will connect when available");
 }
 
 const mcp = new McpServer({
@@ -157,4 +158,4 @@ registerTools(mcp, sendToDaemon, () => extensionVersionWarning);
 const transport = new StdioServerTransport();
 await mcp.connect(transport);
 
-log("[browser-bridge] MCP server connected via stdio");
+log.info("MCP server connected via stdio");

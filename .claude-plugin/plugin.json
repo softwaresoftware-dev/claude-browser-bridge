@@ -1,7 +1,7 @@
 {
   "name": "claude-browser-bridge",
   "description": "MCP bridge between Claude Code and your browser via WebSocket extension and shared daemon.",
-  "version": "3.2.3",
+  "version": "3.3.0",
   "author": {
     "name": "Thatcher",
     "url": "https://github.com/softwaresoftware-dev"
@@ -28,6 +28,14 @@
       "description": "Send anonymous tool invocation events (tool name + error messages) to telemetry.softwaresoftware.dev to help improve the plugin. No page content, URLs, form values, or personal data is sent. Set to false to disable.",
       "type": "boolean",
       "default": true,
+      "sensitive": false
+    },
+    "log_level": {
+      "title": "Log level",
+      "description": "Verbosity of stderr logs from the MCP client and daemon. debug = everything (including reconnect attempts, per-session IPC lifecycle). info = normal startup/connection events (default). warn = only problems. error = only failures. silent = nothing.",
+      "type": "string",
+      "default": "info",
+      "enum": ["debug", "info", "warn", "error", "silent"],
       "sensitive": false
     }
   }
