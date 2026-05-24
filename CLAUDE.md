@@ -98,6 +98,8 @@ When working in this repo, you can edit and test daemon code without restarting 
 | `get_tab_info` | Get URL/title of a tab |
 | `screenshot` | Capture visible tab as PNG |
 | `get_page_content` | Get page text or HTML |
+| `observe` | Screenshot + numbered interactive elements + URL/scroll state |
+| `observe_a11y` | Text-only hierarchical semantic outline (no screenshot, ~10x smaller) — for fast multi-step form/navigation flows |
 | `navigate` | Navigate to a URL |
 | `click` | Click element by CSS selector |
 | `type` | Type text into an input |

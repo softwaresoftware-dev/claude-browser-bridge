@@ -21028,6 +21028,41 @@ function sendEvent(eventType, metadata) {
 }
 
 // server/tools.js
+function renderOutline(result) {
+  const header = [
+    `url: ${result.url}`,
+    `title: ${result.title}`,
+    `viewport: ${result.viewport.w}x${result.viewport.h}  scroll: ${result.scroll.y}/${result.scroll.maxY}`,
+    ""
+  ];
+  const lines = [];
+  function walk(node, depth) {
+    const indent = "  ".repeat(depth);
+    const parts = [`[${node.id}]`, node.role || node.tag];
+    if (node.level != null) parts.push(`level=${node.level}`);
+    if (node.input_type) parts.push(`type=${node.input_type}`);
+    if (node.name) parts.push(JSON.stringify(node.name));
+    if (node.value != null) parts.push(`value=${JSON.stringify(node.value)}`);
+    if (node.href) parts.push(`\u2192 ${node.href}`);
+    if (node.state) {
+      const flags = [];
+      for (const [k, v] of Object.entries(node.state)) {
+        flags.push(v === true ? k : `${k}=${v}`);
+      }
+      if (flags.length) parts.push(`(${flags.join(" ")})`);
+    }
+    if (node.in_viewport === false) parts.push("(off-screen)");
+    lines.push(indent + parts.join(" "));
+    if (node.text_only) {
+      lines.push(indent + `  \xB7 ${node.text_only}`);
+    }
+    if (node.children) {
+      for (const c of node.children) walk(c, depth + 1);
+    }
+  }
+  for (const top of result.tree) walk(top, 0);
+  return header.concat(lines).join("\n");
+}
 function registerTools(server, send, getWarning = () => null) {
   function withWarning(content) {
     const warning = getWarning();
@@ -21122,15 +21157,16 @@ function registerTools(server, send, getWarning = () => null) {
   );
   server.tool(
     "click",
-    "Click an element by CSS selector",
+    "Click an element. Prefer `id` from observe (context-efficient); fall back to `selector` when needed.",
     {
-      selector: external_exports.string().describe("CSS selector for the element to click"),
+      id: external_exports.string().optional().describe('Element id from observe, e.g. "0-12"'),
+      selector: external_exports.string().optional().describe("CSS selector (use when no id is available)"),
       tab_id: external_exports.number().optional().describe("Tab ID, omit for active tab")
     },
-    async ({ selector, tab_id }) => {
+    async ({ id, selector, tab_id }) => {
       sendEvent("tool_invoked", { tool: "click" });
       try {
-        const result = await send("click", { tab_id, selector });
+        const result = await send("click", { tab_id, id, selector });
         return { content: withWarning([{ type: "text", text: JSON.stringify(result) }]) };
       } catch (err) {
         sendEvent("tool_error", { tool: "click", error: err.message });
@@ -21140,20 +21176,72 @@ function registerTools(server, send, getWarning = () => null) {
   );
   server.tool(
     "type",
-    "Type text into an element by CSS selector",
+    "Type text into an element. Prefer `id` from observe; fall back to `selector`.",
     {
-      selector: external_exports.string().describe("CSS selector for the input element"),
+      id: external_exports.string().optional().describe('Element id from observe, e.g. "0-12"'),
+      selector: external_exports.string().optional().describe("CSS selector (use when no id is available)"),
       text: external_exports.string().describe("Text to type"),
       clear: external_exports.boolean().default(true).describe("Clear existing value first"),
       tab_id: external_exports.number().optional().describe("Tab ID, omit for active tab")
     },
-    async ({ selector, text, clear, tab_id }) => {
+    async ({ id, selector, text, clear, tab_id }) => {
       sendEvent("tool_invoked", { tool: "type" });
       try {
-        const result = await send("type", { tab_id, selector, text, clear });
+        const result = await send("type", { tab_id, id, selector, text, clear });
         return { content: withWarning([{ type: "text", text: JSON.stringify(result) }]) };
       } catch (err) {
         sendEvent("tool_error", { tool: "type", error: err.message });
+        throw err;
+      }
+    }
+  );
+  server.tool(
+    "observe",
+    'Snapshot the page: screenshot + numbered interactive elements + URL/scroll state in one call. Each element has a stable `id` (e.g. "0-12") usable with click/type. Prefer this over screenshot+get_page_content+get_element_info.',
+    {
+      viewport_only: external_exports.boolean().default(false).describe("Return only elements currently in the viewport"),
+      include_screenshot: external_exports.boolean().default(true).describe("Include a PNG screenshot in the response"),
+      tab_id: external_exports.number().optional().describe("Tab ID, omit for active tab")
+    },
+    async ({ viewport_only, include_screenshot, tab_id }) => {
+      sendEvent("tool_invoked", { tool: "observe" });
+      try {
+        const result = await send("observe", { tab_id, viewport_only, include_screenshot });
+        const { screenshot, screenshot_error, ...state } = result;
+        const content = [];
+        if (screenshot) {
+          content.push({ type: "image", data: screenshot, mimeType: "image/png" });
+        }
+        if (screenshot_error) {
+          state.screenshot_error = screenshot_error;
+        }
+        content.push({ type: "text", text: JSON.stringify(state) });
+        return { content: withWarning(content) };
+      } catch (err) {
+        sendEvent("tool_error", { tool: "observe", error: err.message });
+        throw err;
+      }
+    }
+  );
+  server.tool(
+    "observe_a11y",
+    "Fast text-only semantic snapshot. Returns a hierarchical outline of interactive + landmark elements with stable `id` refs (usable with click/type) and a `text_only` field per node capturing surrounding non-interactive text. No screenshot \u2014 ~10x smaller than `observe` and much faster for multi-step form/navigation flows. Refs persist across calls as long as the DOM node exists.",
+    {
+      viewport_only: external_exports.boolean().default(false).describe("Return only elements currently in the viewport"),
+      max_depth: external_exports.number().default(60).describe("Max DOM tree depth to walk"),
+      format: external_exports.enum(["outline", "json"]).default("outline").describe("outline = indented text (compact, Claude-friendly); json = raw tree"),
+      tab_id: external_exports.number().optional().describe("Tab ID, omit for active tab")
+    },
+    async ({ viewport_only, max_depth, format, tab_id }) => {
+      sendEvent("tool_invoked", { tool: "observe_a11y" });
+      try {
+        const result = await send("observe_a11y", { tab_id, viewport_only, max_depth });
+        if (format === "json") {
+          return { content: withWarning([{ type: "text", text: JSON.stringify(result, null, 2) }]) };
+        }
+        return { content: withWarning([{ type: "text", text: renderOutline(result) }]) };
+      } catch (err) {
+        sendEvent("tool_error", { tool: "observe_a11y", error: err.message });
         throw err;
       }
     }
