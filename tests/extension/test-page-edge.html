@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Edge Case Test Page</title>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    .section { border: 1px solid #ccc; padding: 15px; margin: 10px 0; }
+    iframe { width: 300px; height: 150px; border: 1px solid #999; }
+  </style>
+</head>
+<body>
+  <h1 id="title">Edge Case Test Page</h1>
+
+  <!-- Large content for serialization testing -->
+  <div class="section" id="large-content">
+    <h2>Large Content</h2>
+    <div id="large-text"></div>
+    <script>
+      // Generate ~500KB of text content
+      const chunk = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. ";
+      document.getElementById('large-text').textContent = chunk.repeat(4000);
+    </script>
+  </div>
+
+  <!-- Concurrent operation targets -->
+  <div class="section">
+    <h2>Concurrent Ops</h2>
+    <input type="text" id="input-a" placeholder="Input A" />
+    <input type="text" id="input-b" placeholder="Input B" />
+    <input type="text" id="input-c" placeholder="Input C" />
+    <button id="btn-a" onclick="this.dataset.clicked='true'; this.textContent='A clicked'">Button A</button>
+    <button id="btn-b" onclick="this.dataset.clicked='true'; this.textContent='B clicked'">Button B</button>
+  </div>
+
+  <!-- Navigation target -->
+  <div class="section">
+    <h2>Navigation Test</h2>
+    <button id="nav-away-btn" onclick="window.location.href='about:blank'">Navigate Away</button>
+    <div id="slow-appear"></div>
+    <script>
+      // Element that appears after 2s
+      setTimeout(() => {
+        const el = document.createElement('div');
+        el.id = 'delayed-el';
+        el.textContent = 'I appeared after 2s';
+        document.getElementById('slow-appear').appendChild(el);
+      }, 2000);
+    </script>
+  </div>
+
+  <!-- Special characters -->
+  <div class="section">
+    <h2>Special Characters</h2>
+    <input type="text" id="special-input" />
+    <div id="unicode-el">Hello 🌍 世界 مرحبا</div>
+    <div id="html-entities">&lt;script&gt;alert('xss')&lt;/script&gt;</div>
+  </div>
+
+  <!-- Nested / complex selectors -->
+  <div class="section">
+    <h2>Complex Selectors</h2>
+    <div class="parent">
+      <div class="child" data-testid="nested-child">
+        <span class="deep">Deep nested text</span>
+      </div>
+    </div>
+    <div id="with spaces and (parens)">Special ID</div>
+    <button class="btn primary active" id="multi-class">Multi-class button</button>
+  </div>
+
+  <!-- Iframe -->
+  <div class="section">
+    <h2>Iframe Test</h2>
+    <iframe id="test-iframe" srcdoc="<html><body><h1 id='iframe-title'>Inside iframe</h1><input id='iframe-input' /></body></html>"></iframe>
+  </div>
+
+  <!-- Overlapping elements -->
+  <div class="section" style="position: relative;">
+    <h2>Overlap Test</h2>
+    <button id="behind-btn" style="position: relative;">Behind button</button>
+    <div id="overlay" style="position: absolute; top: 30px; left: 0; width: 200px; height: 40px; background: rgba(255,0,0,0.5); z-index: 10;">Overlay div</div>
+  </div>
+
+  <!-- Disabled / readonly -->
+  <div class="section">
+    <h2>Disabled Elements</h2>
+    <input type="text" id="disabled-input" disabled value="can't touch this" />
+    <input type="text" id="readonly-input" readonly value="read only" />
+    <button id="disabled-btn" disabled>Disabled Button</button>
+  </div>
+
+  <!-- contenteditable -->
+  <div class="section">
+    <h2>ContentEditable</h2>
+    <div id="editable" contenteditable="true" style="border: 1px solid #ccc; padding: 10px; min-height: 30px;">Edit me</div>
+  </div>
+
+  <!-- select / dropdown -->
+  <div class="section">
+    <h2>Select Element</h2>
+    <select id="test-select">
+      <option value="a">Option A</option>
+      <option value="b">Option B</option>
+      <option value="c">Option C</option>
+    </select>
+  </div>
+
+</body>
+</html>

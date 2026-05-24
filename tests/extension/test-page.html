@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Browser Bridge Test Page</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    #output { background: #f0f0f0; padding: 10px; margin: 10px 0; min-height: 50px; }
+    input, button { margin: 5px; padding: 8px; }
+    .test-section { border: 1px solid #ccc; padding: 15px; margin: 10px 0; }
+    #hidden-el { display: none; }
+    #zero-size { width: 0; height: 0; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <h1 id="title">Browser Bridge Test Page</h1>
+
+  <div class="test-section">
+    <h2>Form Test</h2>
+    <input type="text" id="name-input" placeholder="Name" />
+    <input type="email" id="email-input" placeholder="Email" />
+    <input type="text" id="search-input" placeholder="Search" />
+    <button id="submit-btn" onclick="document.getElementById('output').textContent = 'Form submitted: ' + document.getElementById('name-input').value">Submit</button>
+  </div>
+
+  <div class="test-section">
+    <h2>Click Test</h2>
+    <button id="click-btn" onclick="this.textContent = 'Clicked!'; this.dataset.clicked = 'true'">Click Me</button>
+    <button id="counter-btn" onclick="this.dataset.count = (parseInt(this.dataset.count || 0) + 1); this.textContent = 'Count: ' + this.dataset.count" data-count="0">Count: 0</button>
+  </div>
+
+  <div class="test-section">
+    <h2>Dynamic Content Test</h2>
+    <button id="add-element-btn" onclick="setTimeout(() => { const el = document.createElement('div'); el.id = 'dynamic-el'; el.textContent = 'I appeared!'; document.getElementById('dynamic-area').appendChild(el); }, 500)">Add Element (500ms delay)</button>
+    <div id="dynamic-area"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>Scroll Test</h2>
+    <div id="scroll-container" style="height: 100px; overflow-y: scroll; border: 1px solid #999;">
+      <div style="height: 500px; padding: 10px;">
+        <p>Top of scrollable area</p>
+        <p style="margin-top: 400px;" id="scroll-bottom">Bottom of scrollable area</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="output">Output will appear here</div>
+
+  <!-- Edge case elements -->
+  <div id="hidden-el">This is hidden</div>
+  <div id="zero-size">Zero size</div>
+</body>
+</html>

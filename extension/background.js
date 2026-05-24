@@ -1,3 +1,6 @@
+importScripts("observer.js");
+importScripts("observer-a11y.js");
+
 const WS_URL = "ws://127.0.0.1:7225";
 
 // --- Connection state ---
@@ -502,6 +505,20 @@ async function getElementCenter(tabId, selector) {
   return result;
 }
 
+// Accept either a bb-id (from observe) or a raw CSS selector, returning the
+// selector to use. Bb-ids match /^\d+-\d+$/; nothing in that shape is a valid
+// CSS selector by itself, so refusing mixed inputs is safe.
+function resolveTargetSelector(params) {
+  if (params.id) {
+    if (!/^\d+-\d+$/.test(params.id)) {
+      throw new Error(`Invalid id format: ${params.id} (expected "<frame>-<index>")`);
+    }
+    return `[data-bb-id="${params.id}"]`;
+  }
+  if (params.selector) return params.selector;
+  throw new Error("Missing required parameter: id or selector");
+}
+
 // --- Request handlers ---
 
 async function handleRequest(action, params, sessionId) {
@@ -587,33 +604,61 @@ async function handleRequest(action, params, sessionId) {
     }
 
     case "click": {
-      if (!params.selector) throw new Error("Missing required parameter: selector");
+      const selector = resolveTargetSelector(params);
       const tabId = await resolveTabId(params.tab_id, sessionId);
-      const { x, y } = await getElementCenter(tabId, params.selector);
+      const { x, y } = await getElementCenter(tabId, selector);
       await cdpClick(tabId, x, y);
-      return { clicked: params.selector, x, y, method: "cdp" };
+      return { clicked: selector, x, y, method: "cdp" };
     }
 
     case "type": {
-      if (!params.selector) throw new Error("Missing required parameter: selector");
+      const selector = resolveTargetSelector(params);
       if (params.text === undefined || params.text === null) throw new Error("Missing required parameter: text");
 
       const tabId = await resolveTabId(params.tab_id, sessionId);
-      // Focus the element first
-      const focusResult = await execInTab(tabId, (selector, clear) => {
-        const el = document.querySelector(selector);
-        if (!el) return { __err: `Element not found: ${selector}` };
+      const focusResult = await execInTab(tabId, (sel, clear) => {
+        const el = document.querySelector(sel);
+        if (!el) return { __err: `Element not found: ${sel}` };
         el.focus();
         if (clear) {
           el.value = "";
           el.dispatchEvent(new Event("input", { bubbles: true }));
         }
         return { ok: true };
-      }, [params.selector, params.clear !== false]);
+      }, [selector, params.clear !== false]);
       if (focusResult && focusResult.__err) throw new Error(focusResult.__err);
-      // Type via CDP for trusted key events
       await cdpType(tabId, params.text);
-      return { typed: params.text, selector: params.selector, method: "cdp" };
+      return { typed: params.text, selector, method: "cdp" };
+    }
+
+    case "observe": {
+      const tabId = await resolveTabId(params.tab_id, sessionId);
+      const opts = {
+        frameIndex: 0,
+        viewportOnly: !!params.viewport_only,
+      };
+      const result = await execInTab(tabId, browserBridgeObserve, [opts]);
+
+      if (params.include_screenshot !== false) {
+        try {
+          await attachDebugger(tabId);
+          const shot = await cdpSend(tabId, "Page.captureScreenshot", { format: "png" });
+          result.screenshot = shot.data;
+        } catch (err) {
+          result.screenshot_error = err.message;
+        }
+      }
+      return result;
+    }
+
+    case "observe_a11y": {
+      const tabId = await resolveTabId(params.tab_id, sessionId);
+      const opts = {
+        frameIndex: 0,
+        viewportOnly: !!params.viewport_only,
+        maxDepth: params.max_depth || 60,
+      };
+      return await execInTab(tabId, browserBridgeObserveA11y, [opts]);
     }
 
     case "eval_js": {

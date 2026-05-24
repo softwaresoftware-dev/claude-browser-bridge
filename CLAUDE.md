@@ -119,6 +119,16 @@ When a session disconnects, the daemon sends a `session_end` message. The extens
 
 Session group state is persisted to `chrome.storage.session` so it survives service worker restarts.
 
+## Testing
+
+The extension at `extension/` is the source of truth (previously drifted from a standalone repo which is now archived). Tests live in `tests/extension/` and run against the bundled extension by copying it to `/tmp` with the WS port patched in.
+
+- `make test` — manifest tests only (fast, no browser)
+- `make test-ext` — full browser suite (requires `/usr/bin/brave-browser`, launches headed windows, ~3 min)
+- `make test-all` — everything
+
+`tests/extension/test-helpers.js` exposes `copyExtension({ destDir, wsPort })`. Use it when adding new browser tests so they stay in sync with the extension layout.
+
 ## Notes
 
 - All stdout is reserved for MCP stdio protocol — logs go to stderr
