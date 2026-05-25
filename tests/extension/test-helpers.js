@@ -8,6 +8,16 @@ const fs = require("fs");
 const path = require("path");
 
 const EXT_SRC = path.resolve(__dirname, "../../extension");
+const ARTIFACTS_ROOT = path.resolve(__dirname, ".test-artifacts");
+
+// Returns (and ensures the existence of) a per-suite artifact directory.
+// Use these for the extension copy + Chrome profile so they live in the repo
+// (gitignored) rather than /tmp, making post-failure inspection easy.
+function artifactDir(name) {
+  const dir = path.join(ARTIFACTS_ROOT, name);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
 
 const EXTENSION_FILES = [
   "background.js",
@@ -39,4 +49,4 @@ function copyExtension({ destDir, wsPort }) {
   }
 }
 
-module.exports = { copyExtension, EXT_SRC };
+module.exports = { copyExtension, EXT_SRC, artifactDir };

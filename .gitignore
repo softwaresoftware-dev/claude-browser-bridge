@@ -1,1 +1,4 @@
 node_modules/
+research/
+tests/extension/.test-artifacts/
+tests/__pycache__/

@@ -2,11 +2,11 @@ const puppeteer = require("puppeteer-core");
 const { WebSocketServer } = require("ws");
 const fs = require("fs");
 const path = require("path");
-const { copyExtension } = require("./test-helpers");
+const { copyExtension, artifactDir } = require("./test-helpers");
 
 const PORT = 7226;
-const EXTENSION_PATH = "/tmp/browser-bridge-test";
-const PROFILE_DIR = "/tmp/puppeteer-test-profile";
+const EXTENSION_PATH = artifactDir("runner1-ext");
+const PROFILE_DIR = artifactDir("runner1-profile");
 const TEST_PAGE = `file://${path.resolve(__dirname, "test-page.html")}`;
 
 // Colors

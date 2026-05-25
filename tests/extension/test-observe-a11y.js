@@ -7,11 +7,11 @@ const puppeteer = require("puppeteer-core");
 const { WebSocketServer } = require("ws");
 const fs = require("fs");
 const path = require("path");
-const { copyExtension } = require("./test-helpers");
+const { copyExtension, artifactDir } = require("./test-helpers");
 
 const PORT = 7227;
-const EXT_DST = "/tmp/browser-bridge-test-a11y";
-const PROFILE_DIR = "/tmp/puppeteer-test-profile-a11y";
+const EXT_DST = artifactDir("a11y-ext");
+const PROFILE_DIR = artifactDir("a11y-profile");
 const TEST_PAGE = `file://${path.resolve(__dirname, "test-page.html")}`;
 
 const green = (s) => `\x1b[32m${s}\x1b[0m`;
