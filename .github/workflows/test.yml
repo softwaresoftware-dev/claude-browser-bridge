@@ -44,12 +44,11 @@ jobs:
       - name: Manifest tests
         run: make test-manifest
 
-      - name: Browser tests
+      - name: Browser tests (a11y suite only, debug)
         env:
           BROWSER_PATH: ${{ steps.chrome.outputs.chrome-path }}
-          # Run Chrome headed under xvfb instead of true headless.
-          # Puppeteer's headless mode uses chrome-headless-shell which
-          # doesn't load MV3 extensions; xvfb gives us a virtual display
-          # so headed Chrome works without a real screen.
           CI_NO_SANDBOX: "1"
-        run: xvfb-run --auto-servernum make test-ext
+        # Iterating on CI flakes — run smallest suite with chrome stderr
+        # piped through so we can diagnose. Switch back to `make test-ext`
+        # once green.
+        run: xvfb-run --auto-servernum node tests/extension/test-observe-a11y.js

@@ -250,6 +250,7 @@ async function main() {
   const browser = await puppeteer.launch({
     executablePath: process.env.BROWSER_PATH || "/usr/bin/brave-browser",
     headless: process.env.TEST_HEADLESS === "1",
+    dumpio: process.env.CI_NO_SANDBOX === "1",
     args: [
       `--disable-extensions-except=${EXT_DST}`,
       `--load-extension=${EXT_DST}`,
