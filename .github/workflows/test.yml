@@ -53,11 +53,8 @@ jobs:
       - name: Manifest tests
         run: make test-manifest
 
-      - name: Browser tests (a11y suite only, debug)
+      - name: Browser tests
         env:
           BROWSER_PATH: ${{ steps.chrome.outputs.chrome-path }}
           CI_NO_SANDBOX: "1"
-        # Iterating on CI flakes — run smallest suite with chrome stderr
-        # piped through so we can diagnose. Switch back to `make test-ext`
-        # once green.
-        run: xvfb-run --auto-servernum node tests/extension/test-observe-a11y.js
+        run: xvfb-run --auto-servernum make test-ext

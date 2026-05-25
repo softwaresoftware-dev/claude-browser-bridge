@@ -250,15 +250,12 @@ async function main() {
   const browser = await puppeteer.launch({
     executablePath: process.env.BROWSER_PATH || "/usr/bin/brave-browser",
     headless: process.env.TEST_HEADLESS === "1",
-    dumpio: process.env.CI_NO_SANDBOX === "1",
     args: [
       `--disable-extensions-except=${EXT_DST}`,
       `--load-extension=${EXT_DST}`,
       "--no-first-run",
       "--disable-default-apps",
-      ...(process.env.CI_NO_SANDBOX === "1"
-        ? ["--no-sandbox", "--disable-dev-shm-usage", "--enable-logging=stderr", "--v=1"]
-        : []),
+      ...(process.env.CI_NO_SANDBOX === "1" ? ["--no-sandbox", "--disable-dev-shm-usage"] : []),
     ],
     ignoreDefaultArgs: ["--disable-extensions", "--enable-automation", "--disable-component-extensions-with-background-pages"],
     userDataDir: PROFILE_DIR,
@@ -267,7 +264,7 @@ async function main() {
 
   console.log("Waiting for extension to connect...");
   try {
-    await waitForConnection(wss, 60000);
+    await waitForConnection(wss, 15000);
     console.log(green("Extension connected!\n"));
     await new Promise((r) => setTimeout(r, 1000));
     const failed = await runTests();
