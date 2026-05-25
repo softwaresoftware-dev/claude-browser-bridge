@@ -44,10 +44,12 @@ jobs:
       - name: Manifest tests
         run: make test-manifest
 
-      - name: Browser tests (headless)
+      - name: Browser tests
         env:
           BROWSER_PATH: ${{ steps.chrome.outputs.chrome-path }}
-          TEST_HEADLESS: "1"
-        # Wrap in xvfb-run as a safety net — some Chrome builds still want an
-        # X server even with --headless=new.
+          # Run Chrome headed under xvfb instead of true headless.
+          # Puppeteer's headless mode uses chrome-headless-shell which
+          # doesn't load MV3 extensions; xvfb gives us a virtual display
+          # so headed Chrome works without a real screen.
+          CI_NO_SANDBOX: "1"
         run: xvfb-run --auto-servernum make test-ext

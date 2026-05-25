@@ -255,7 +255,7 @@ async function main() {
       `--load-extension=${EXT_DST}`,
       "--no-first-run",
       "--disable-default-apps",
-      ...(process.env.TEST_HEADLESS === "1" ? ["--no-sandbox", "--disable-dev-shm-usage"] : []),
+      ...(process.env.CI_NO_SANDBOX === "1" ? ["--no-sandbox", "--disable-dev-shm-usage"] : []),
     ],
     ignoreDefaultArgs: ["--disable-extensions", "--enable-automation", "--disable-component-extensions-with-background-pages"],
     userDataDir: PROFILE_DIR,
