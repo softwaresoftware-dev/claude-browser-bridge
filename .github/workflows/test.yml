@@ -21,10 +21,16 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Chromium
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y chromium-browser xvfb
+      - name: Install Chrome
+        # Ubuntu's chromium-browser is a snap and can't read /tmp where the
+        # test extension lives, so it never loads. Use real Chrome.
+        uses: browser-actions/setup-chrome@v1
+        id: chrome
+        with:
+          chrome-version: stable
+
+      - name: Install xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
 
       - name: Install Node deps
         run: npm ci
@@ -40,8 +46,8 @@ jobs:
 
       - name: Browser tests (headless)
         env:
-          BROWSER_PATH: /usr/bin/chromium-browser
+          BROWSER_PATH: ${{ steps.chrome.outputs.chrome-path }}
           TEST_HEADLESS: "1"
-        # Wrap in xvfb-run as a safety net — some Chromium builds still
-        # require an X server even with --headless=new.
+        # Wrap in xvfb-run as a safety net — some Chrome builds still want an
+        # X server even with --headless=new.
         run: xvfb-run --auto-servernum make test-ext
