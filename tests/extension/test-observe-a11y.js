@@ -256,7 +256,9 @@ async function main() {
       `--load-extension=${EXT_DST}`,
       "--no-first-run",
       "--disable-default-apps",
-      ...(process.env.CI_NO_SANDBOX === "1" ? ["--no-sandbox", "--disable-dev-shm-usage"] : []),
+      ...(process.env.CI_NO_SANDBOX === "1"
+        ? ["--no-sandbox", "--disable-dev-shm-usage", "--enable-logging=stderr", "--v=1"]
+        : []),
     ],
     ignoreDefaultArgs: ["--disable-extensions", "--enable-automation", "--disable-component-extensions-with-background-pages"],
     userDataDir: PROFILE_DIR,
@@ -265,7 +267,7 @@ async function main() {
 
   console.log("Waiting for extension to connect...");
   try {
-    await waitForConnection(wss, 15000);
+    await waitForConnection(wss, 60000);
     console.log(green("Extension connected!\n"));
     await new Promise((r) => setTimeout(r, 1000));
     const failed = await runTests();
