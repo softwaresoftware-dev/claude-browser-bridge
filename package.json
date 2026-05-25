@@ -1,6 +1,6 @@
 {
   "name": "claude-browser-bridge",
-  "version": "3.6.0",
+  "version": "3.7.0",
   "type": "module",
   "description": "MCP bridge between Claude Code and your browser via shared daemon",
   "bin": {
@@ -11,7 +11,7 @@
     "build": "node esbuild.config.js",
     "start": "node server/index.js",
     "daemon": "node server/daemon.js",
-    "test:ext": "node tests/extension/test-runner.js && node tests/extension/test-runner-r2.js && node tests/extension/test-observe-a11y.js"
+    "test:ext": "node tests/extension/test-runner.js && node tests/extension/test-runner-r2.js && node tests/extension/test-observe-a11y.js && node tests/extension/test-backgrounded-tab.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",

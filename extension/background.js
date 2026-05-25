@@ -416,6 +416,18 @@ async function _attachDebuggerImpl(tabId) {
 
   debuggerAttached.add(tabId);
 
+  // Make backgrounded tabs report visibilityState === "visible" so pages
+  // like LinkedIn that pause their own SPA when hidden keep running layout.
+  // Without this, getBoundingClientRect on backgrounded tabs returns zeros
+  // and clicks resolve to (0,0). Verified by experiment-backgrounded-tab.js.
+  // Per-debugger-session, per-tab — parallel sessions don't conflict.
+  try {
+    await chrome.debugger.sendCommand({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled: true });
+  } catch (err) {
+    // Non-fatal: layout will still work on foreground tabs.
+    console.warn("[claude-browser-bridge] setFocusEmulationEnabled failed:", err && err.message);
+  }
+
   // Auto-cleanup when tab closes
   const onRemoved = (removedId) => {
     if (removedId === tabId) {
@@ -623,6 +635,9 @@ async function handleRequest(action, params, sessionId) {
     case "click": {
       const selector = resolveTargetSelector(params);
       const tabId = await resolveTabId(params.tab_id, sessionId);
+      // Attach before bbox query so backgrounded tabs (LinkedIn etc.) report
+      // real coordinates instead of zeros.
+      await attachDebugger(tabId);
       const { x, y } = await getElementCenter(tabId, selector);
       await cdpClick(tabId, x, y);
       return { clicked: selector, x, y, method: "cdp" };
@@ -633,6 +648,7 @@ async function handleRequest(action, params, sessionId) {
       if (params.text === undefined || params.text === null) throw new Error("Missing required parameter: text");
 
       const tabId = await resolveTabId(params.tab_id, sessionId);
+      await attachDebugger(tabId);
       const focusResult = await execInTab(tabId, (sel, clear) => {
         const el = document.querySelector(sel);
         if (!el) return { __err: `Element not found: ${sel}` };
@@ -650,6 +666,7 @@ async function handleRequest(action, params, sessionId) {
 
     case "observe": {
       const tabId = await resolveTabId(params.tab_id, sessionId);
+      await attachDebugger(tabId);
       const opts = {
         frameIndex: 0,
         viewportOnly: !!params.viewport_only,
@@ -670,6 +687,7 @@ async function handleRequest(action, params, sessionId) {
 
     case "observe_a11y": {
       const tabId = await resolveTabId(params.tab_id, sessionId);
+      await attachDebugger(tabId);
       const opts = {
         frameIndex: 0,
         viewportOnly: !!params.viewport_only,
@@ -710,6 +728,7 @@ async function handleRequest(action, params, sessionId) {
         throw new Error("Missing required parameter: fields (array of {selector, value})");
       }
       const tabId = await resolveTabId(params.tab_id, sessionId);
+      await attachDebugger(tabId);
       return await execInTab(tabId, (fields) => {
         const results = [];
         for (const { selector, value } of fields) {
@@ -731,6 +750,7 @@ async function handleRequest(action, params, sessionId) {
     case "get_element_info": {
       if (!params.selector) throw new Error("Missing required parameter: selector");
       const tabId = await resolveTabId(params.tab_id, sessionId);
+      await attachDebugger(tabId);
       const info = await execInTab(tabId, (selector) => {
         let el;
         try {
@@ -759,6 +779,7 @@ async function handleRequest(action, params, sessionId) {
     case "wait_for": {
       if (!params.selector) throw new Error("Missing required parameter: selector");
       const tabId = await resolveTabId(params.tab_id, sessionId);
+      await attachDebugger(tabId);
       const timeout = params.timeout || 10000;
 
       const waitResult = await execInTab(tabId, (selector, timeoutMs) => {
@@ -791,6 +812,7 @@ async function handleRequest(action, params, sessionId) {
 
     case "scroll": {
       const tabId = await resolveTabId(params.tab_id, sessionId);
+      await attachDebugger(tabId);
       const scrollResult = await execInTab(tabId, (x, y, selector, behavior) => {
         const opts = { left: x, top: y, behavior };
         if (selector) {

@@ -18,6 +18,7 @@ test-ext:
 	node tests/extension/test-runner.js
 	node tests/extension/test-runner-r2.js
 	node tests/extension/test-observe-a11y.js
+	node tests/extension/test-backgrounded-tab.js
 
 test-all: test-manifest test-ext
 
