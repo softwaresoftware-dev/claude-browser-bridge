@@ -21,16 +21,25 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Chrome
-        # Ubuntu's chromium-browser is a snap and can't read /tmp where the
-        # test extension lives, so it never loads. Use real Chrome.
-        uses: browser-actions/setup-chrome@v1
-        id: chrome
-        with:
-          chrome-version: stable
+      - name: Install xvfb + chrome deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb \
+            libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 \
+            libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
+            libcairo2 libasound2t64
 
-      - name: Install xvfb
-        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Install Chrome for Testing
+        id: chrome
+        # Stable Google Chrome refuses --disable-extensions-except / --load-extension
+        # for security. Chrome for Testing (the puppeteer-managed build) allows
+        # those flags and is the supported path for extension testing.
+        run: |
+          npx -y @puppeteer/browsers install chrome@stable --path "$RUNNER_TEMP/chrome"
+          CHROME_BIN=$(find "$RUNNER_TEMP/chrome" -type f -name chrome -executable | head -1)
+          echo "Chrome for Testing at $CHROME_BIN"
+          "$CHROME_BIN" --version
+          echo "chrome-path=$CHROME_BIN" >> "$GITHUB_OUTPUT"
 
       - name: Install Node deps
         run: npm ci
