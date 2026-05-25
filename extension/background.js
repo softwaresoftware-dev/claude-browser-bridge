@@ -454,35 +454,52 @@ async function cdpSend(tabId, method, params = {}) {
   }
 }
 
+// Per-tab serialization for full input sequences. Without this, two
+// concurrent cdpClick calls interleave their mousePressed/mouseReleased pairs
+// and Chrome reads it as a drag instead of two clicks.
+const inputLocks = new Map();
+function withInputLock(tabId, fn) {
+  const prev = inputLocks.get(tabId) || Promise.resolve();
+  const current = prev.then(fn, fn);
+  inputLocks.set(tabId, current.catch(() => {}));
+  return current;
+}
+
 async function cdpClick(tabId, x, y) {
   await attachDebugger(tabId);
-  await cdpSend(tabId, "Input.dispatchMouseEvent", {
-    type: "mousePressed", x, y, button: "left", clickCount: 1,
-  });
-  await cdpSend(tabId, "Input.dispatchMouseEvent", {
-    type: "mouseReleased", x, y, button: "left", clickCount: 1,
+  return withInputLock(tabId, async () => {
+    await cdpSend(tabId, "Input.dispatchMouseEvent", {
+      type: "mousePressed", x, y, button: "left", clickCount: 1,
+    });
+    await cdpSend(tabId, "Input.dispatchMouseEvent", {
+      type: "mouseReleased", x, y, button: "left", clickCount: 1,
+    });
   });
 }
 
 async function cdpType(tabId, text) {
   await attachDebugger(tabId);
-  for (const char of text) {
-    await cdpSend(tabId, "Input.dispatchKeyEvent", {
-      type: "keyDown", text: char, unmodifiedText: char,
-    });
-    await cdpSend(tabId, "Input.dispatchKeyEvent", {
-      type: "keyUp", text: char, unmodifiedText: char,
-    });
-  }
+  return withInputLock(tabId, async () => {
+    for (const char of text) {
+      await cdpSend(tabId, "Input.dispatchKeyEvent", {
+        type: "keyDown", text: char, unmodifiedText: char,
+      });
+      await cdpSend(tabId, "Input.dispatchKeyEvent", {
+        type: "keyUp", text: char, unmodifiedText: char,
+      });
+    }
+  });
 }
 
 async function cdpPress(tabId, key, code, keyCode) {
   await attachDebugger(tabId);
-  await cdpSend(tabId, "Input.dispatchKeyEvent", {
-    type: "keyDown", key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode,
-  });
-  await cdpSend(tabId, "Input.dispatchKeyEvent", {
-    type: "keyUp", key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode,
+  return withInputLock(tabId, async () => {
+    await cdpSend(tabId, "Input.dispatchKeyEvent", {
+      type: "keyDown", key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode,
+    });
+    await cdpSend(tabId, "Input.dispatchKeyEvent", {
+      type: "keyUp", key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode,
+    });
   });
 }
 
@@ -665,10 +682,26 @@ async function handleRequest(action, params, sessionId) {
       const code = params.code || params.expression;
       if (!code) throw new Error("Missing required parameter: code (or expression)");
       const tabId = await resolveTabId(params.tab_id, sessionId);
+      // chrome.scripting.executeScript swallows thrown errors from the injected
+      // function into a frame.result of undefined. Catch in-page and surface
+      // explicitly so callers can rely on rejection semantics.
       const result = await execInTabMainWorld(tabId, (c) => {
-        // eslint-disable-next-line no-eval
-        return eval(c);
+        try {
+          // eslint-disable-next-line no-eval
+          return { __bb_ok: true, value: eval(c) };
+        } catch (e) {
+          return { __bb_ok: false, error: e && (e.message || String(e)) };
+        }
       }, [code]);
+      if (result && result.__bb_ok === false) {
+        throw new Error(`eval_js: ${result.error}`);
+      }
+      if (result && result.__bb_ok === true) {
+        // `value: undefined` is dropped during cross-context serialization; the
+        // pre-wrapper code returned undefined directly which crossed back as
+        // null. Preserve that semantic.
+        return "value" in result ? result.value : null;
+      }
       return result;
     }
 
@@ -699,7 +732,12 @@ async function handleRequest(action, params, sessionId) {
       if (!params.selector) throw new Error("Missing required parameter: selector");
       const tabId = await resolveTabId(params.tab_id, sessionId);
       const info = await execInTab(tabId, (selector) => {
-        const el = document.querySelector(selector);
+        let el;
+        try {
+          el = document.querySelector(selector);
+        } catch (e) {
+          return { __err: `Invalid selector: ${selector} (${e && (e.message || String(e))})` };
+        }
         if (!el) return { __err: `Element not found: ${selector}` };
         const rect = el.getBoundingClientRect();
         const attrs = {};

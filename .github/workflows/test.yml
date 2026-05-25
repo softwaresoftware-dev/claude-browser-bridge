@@ -1,0 +1,47 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Chromium
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser xvfb
+
+      - name: Install Node deps
+        run: npm ci
+
+      - name: Install Python deps
+        run: pip install pytest
+
+      - name: Build
+        run: make build
+
+      - name: Manifest tests
+        run: make test-manifest
+
+      - name: Browser tests (headless)
+        env:
+          BROWSER_PATH: /usr/bin/chromium-browser
+          TEST_HEADLESS: "1"
+        # Wrap in xvfb-run as a safety net — some Chromium builds still
+        # require an X server even with --headless=new.
+        run: xvfb-run --auto-servernum make test-ext

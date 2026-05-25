@@ -248,8 +248,8 @@ async function main() {
 
   console.log("Launching Brave with extension...");
   const browser = await puppeteer.launch({
-    executablePath: "/usr/bin/brave-browser",
-    headless: false,
+    executablePath: process.env.BROWSER_PATH || "/usr/bin/brave-browser",
+    headless: process.env.TEST_HEADLESS === "1",
     args: [
       `--disable-extensions-except=${EXT_DST}`,
       `--load-extension=${EXT_DST}`,
