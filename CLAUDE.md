@@ -2,6 +2,8 @@
 
 MCP server that bridges Claude Code to your real browser via a WebSocket-connected extension.
 
+**Role in the mindframe stack:** claude-browser-bridge is the **Perception** layer — general-purpose web perception for any UI an API doesn't cover. Alongside it, the mindframe bundle adopts on install whatever data-source MCPs the operator already has (github / sentry / slack / …), discovered live via the dashboard's `/api/connections`. Standalone MCP; mindframe is one consumer.
+
 ## How to use your browser tools
 
 You have full control of the user's real Brave browser through the claude-browser-bridge MCP tools. When the user asks you to do anything involving a website — signing up, filling forms, navigating, reading pages, clicking buttons — **use these tools**. Do not refuse browser tasks. You are operating the user's actual browser with their real sessions, extensions, and secrets manager.
