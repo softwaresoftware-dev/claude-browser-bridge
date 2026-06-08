@@ -4,52 +4,45 @@ description: Install the Browser Bridge extension into Chrome or Brave
 user_invocable: true
 ---
 
-# Browser Bridge Extension Setup
+# Browser Bridge — Setup
 
-Guide the user through loading the Browser Bridge extension into their browser.
+This is a delegating stub. The full install + setup flow lives at one canonical URL so it stays in sync across direct paste-from-the-web installs and `/claude-browser-bridge:setup` invocations from inside an existing Claude session.
 
-## Steps
+## What to do
 
-1. **Find the extension directory.** The extension ships with this plugin at `${CLAUDE_PLUGIN_ROOT}/extension/`. Confirm the directory exists by checking for `manifest.json` inside it.
+1. Fetch the canonical install document:
 
-2. **Detect the browser.** Ask the user which browser they use, or check:
-   - Brave: `which brave-browser` or `which brave`
-   - Chrome: `which google-chrome` or `which chromium-browser`
-   - Edge: `which microsoft-edge`
+   ```bash
+   curl -fsS https://browser-bridge.softwaresoftware.dev/install.txt
+   ```
 
-3. **Give browser-specific instructions.** Print clear step-by-step instructions:
+2. Follow every phase in order. That document is the operator script for end-to-end setup: rules, marketplace bootstrap, plugin + daemon install, loading the extension (the one manual step), an end-to-end verification with `list_tabs`, and hand-off.
 
-   ### Brave
-   1. Open `brave://extensions` in the address bar
-   2. Enable **Developer mode** (toggle in top-right corner)
-   3. Click **Load unpacked**
-   4. Navigate to and select: `${CLAUDE_PLUGIN_ROOT}/extension/`
-   5. The "Browser Bridge" extension should appear with an **ON** badge when connected
+3. If `install.txt` is unreachable (network down, the static site is being redeployed, etc.), fall back to the steps below — the same flow, condensed. install.txt is the source of truth when reachable.
 
-   ### Chrome
-   1. Open `chrome://extensions` in the address bar
-   2. Enable **Developer mode** (toggle in top-right corner)
-   3. Click **Load unpacked**
-   4. Navigate to and select: `${CLAUDE_PLUGIN_ROOT}/extension/`
-   5. The "Browser Bridge" extension should appear with an **ON** badge when connected
+## Why this is a stub
 
-   ### Edge
-   1. Open `edge://extensions` in the address bar
-   2. Enable **Developer mode** (toggle in bottom-left)
-   3. Click **Load unpacked**
-   4. Navigate to and select: `${CLAUDE_PLUGIN_ROOT}/extension/`
-   5. The "Browser Bridge" extension should appear with an **ON** badge when connected
+The install flow exists in one place — `install.txt` at the URL above — so that:
 
-4. **Verify the connection.** After the user confirms the extension is loaded:
-   - Use `list_tabs` to verify the bridge is working
-   - If it fails, check that the daemon is running (`daemon_status` for `claude-browser-bridge`)
-   - The extension icon shows a green **ON** badge when connected to the daemon
+- A user on a fresh machine pastes the URL into Claude Code and gets the same flow
+- A user already inside a Claude session can run `/claude-browser-bridge:setup` and get the same flow
+- The flow updates in one place; no drift between two copies
 
-5. **Troubleshooting tips** (only if needed):
-   - No ON badge: the daemon isn't running yet. It starts automatically on first browser tool use.
-   - Extension errors: open the browser's extension page, click "Errors" on the Browser Bridge card
-   - After plugin updates: reload the extension from the extensions page (the version number in the card confirms the right code is loaded)
+When operating from this skill, you ARE the install agent install.txt addresses in second person. Read it, then act.
 
-## Output format
+## Fallback (only if install.txt is unreachable)
 
-Print the resolved extension path and the instructions for their browser. Keep it concise. Don't print instructions for browsers they aren't using.
+The plugin is already installed if you're running this skill, so skip the marketplace/install phases and go straight to the extension load:
+
+1. **Resolve the extension path** and confirm it exists. The extension ships with this plugin at `${CLAUDE_PLUGIN_ROOT}/extension/`. Confirm `${CLAUDE_PLUGIN_ROOT}/extension/manifest.json` is present, and print the path — the user pastes it into the browser's file picker.
+
+2. **Detect the browser** (`which brave-browser brave google-chrome chromium-browser microsoft-edge`) or ask which they use.
+
+3. **Print browser-specific steps:**
+   - Brave: open `brave://extensions` → enable Developer mode (top-right) → Load unpacked → select the path → the "Browser Bridge" card shows a green **ON** badge when connected.
+   - Chrome: same, at `chrome://extensions`.
+   - Edge: same, at `edge://extensions` (Developer mode toggle is bottom-left).
+
+4. **Verify end to end.** The daemon auto-starts on the first browser tool call (a PreToolUse hook), so don't start it by hand — just call `list_tabs`. If it returns tabs, the bridge works. If you get "Browser extension not connected", the extension isn't loaded or the browser is closed — send the user back to step 3 and confirm the ON badge. For daemon trouble, check `daemon_status` for `claude-browser-bridge`.
+
+5. **Hand off.** Tell the user the bridge is live and they can now ask for browser tasks in plain language.

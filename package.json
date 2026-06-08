@@ -1,6 +1,6 @@
 {
   "name": "claude-browser-bridge",
-  "version": "3.7.0",
+  "version": "3.7.1",
   "type": "module",
   "description": "MCP bridge between Claude Code and your browser via shared daemon",
   "bin": {
