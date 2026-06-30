@@ -27,6 +27,20 @@ export function getIpcAddress() {
   return join(dir, `${DAEMON_NAME}.sock`);
 }
 
+/**
+ * Path to the daemon's pidfile: ~/.claude/daemons/<DAEMON_NAME>.pid.
+ *
+ * Always anchored to the real daemons dir (not derived from DAEMON_IPC_ADDRESS)
+ * so it matches exactly where the PreToolUse hook and daemon-manager look. The
+ * daemon writes this on startup so the hook's liveness check passes regardless
+ * of who launched it — lazy nohup, systemd, or launchd.
+ */
+export function getPidFilePath() {
+  const dir = join(homedir(), ".claude", "daemons");
+  mkdirSync(dir, { recursive: true });
+  return join(dir, `${DAEMON_NAME}.pid`);
+}
+
 export { DAEMON_NAME, PORT };
 
 /**

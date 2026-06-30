@@ -11,10 +11,10 @@
 import { WebSocketServer } from "ws";
 import { createServer as createNetServer } from "net";
 import { createServer as createHttpServer } from "http";
-import { unlinkSync, existsSync, readFileSync } from "fs";
+import { unlinkSync, existsSync, readFileSync, writeFileSync } from "fs";
 import { randomUUID } from "crypto";
 import { join } from "path";
-import { getIpcAddress, createNdjsonParser, sendNdjson, PORT } from "./ipc.js";
+import { getIpcAddress, getPidFilePath, createNdjsonParser, sendNdjson, PORT } from "./ipc.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("daemon");
@@ -253,8 +253,19 @@ const ipcServer = createNetServer((socket) => {
   });
 });
 
+const pidFilePath = getPidFilePath();
+
 ipcServer.listen(ipcAddress, () => {
   log.info(`IPC server listening on ${ipcAddress}`);
+  // Write our pidfile once fully up. The PreToolUse hook checks this to decide
+  // whether the daemon is alive; keeping it current lets the hook defer to a
+  // managed daemon (systemd/launchd) instead of spawning a duplicate.
+  try {
+    writeFileSync(pidFilePath, String(process.pid));
+    log.info(`Wrote pidfile ${pidFilePath} (pid ${process.pid})`);
+  } catch (err) {
+    log.warn(`Could not write pidfile ${pidFilePath}: ${err.message}`);
+  }
 });
 
 ipcServer.on("error", (err) => {
@@ -284,6 +295,13 @@ function cleanup() {
   if (!ipcAddress.startsWith("\\\\.\\pipe\\")) {
     try { unlinkSync(ipcAddress); } catch { /* already gone */ }
   }
+  // Remove our pidfile, but only if it still points at us — a successor daemon
+  // may have already claimed it during a restart.
+  try {
+    if (readFileSync(pidFilePath, "utf-8").trim() === String(process.pid)) {
+      unlinkSync(pidFilePath);
+    }
+  } catch { /* already gone or owned by a successor */ }
   // Close WebSocket and HTTP servers
   wss.close();
   httpServer.close();

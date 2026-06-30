@@ -3675,6 +3675,11 @@ function getIpcAddress() {
   (0, import_fs.mkdirSync)(dir, { recursive: true });
   return (0, import_path.join)(dir, `${DAEMON_NAME}.sock`);
 }
+function getPidFilePath() {
+  const dir = (0, import_path.join)((0, import_os.homedir)(), ".claude", "daemons");
+  (0, import_fs.mkdirSync)(dir, { recursive: true });
+  return (0, import_path.join)(dir, `${DAEMON_NAME}.pid`);
+}
 function createNdjsonParser(onMessage) {
   let buffer = "";
   return (data) => {
@@ -3893,8 +3898,15 @@ var ipcServer = (0, import_net.createServer)((socket) => {
     log.error("IPC client error:", err.message);
   });
 });
+var pidFilePath = getPidFilePath();
 ipcServer.listen(ipcAddress, () => {
   log.info(`IPC server listening on ${ipcAddress}`);
+  try {
+    (0, import_fs2.writeFileSync)(pidFilePath, String(process.pid));
+    log.info(`Wrote pidfile ${pidFilePath} (pid ${process.pid})`);
+  } catch (err) {
+    log.warn(`Could not write pidfile ${pidFilePath}: ${err.message}`);
+  }
 });
 ipcServer.on("error", (err) => {
   log.error(`IPC server error: ${err.message}`);
@@ -3918,6 +3930,12 @@ function cleanup() {
       (0, import_fs2.unlinkSync)(ipcAddress);
     } catch {
     }
+  }
+  try {
+    if ((0, import_fs2.readFileSync)(pidFilePath, "utf-8").trim() === String(process.pid)) {
+      (0, import_fs2.unlinkSync)(pidFilePath);
+    }
+  } catch {
   }
   wss.close();
   httpServer.close();
