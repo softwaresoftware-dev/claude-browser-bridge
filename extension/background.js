@@ -514,6 +514,13 @@ const NAMED_KEYS = {
 // Modifier bitmask per CDP Input.dispatchKeyEvent: Alt=1, Ctrl=2, Meta=4, Shift=8
 const MODIFIER_BITS = { Alt: 1, Control: 2, Ctrl: 2, Meta: 4, Cmd: 4, Shift: 8 };
 
+// Editing shortcuts differ per OS: select-all is Cmd+A on macOS, Ctrl+A
+// elsewhere. Resolved once at startup.
+let primaryModifier = MODIFIER_BITS.Control;
+chrome.runtime.getPlatformInfo((info) => {
+  if (info.os === "mac") primaryModifier = MODIFIER_BITS.Meta;
+});
+
 async function cdpKeyPress(tabId, keyName, modifiers = 0) {
   await attachDebugger(tabId);
   let def = NAMED_KEYS[keyName];
@@ -852,7 +859,7 @@ async function handleRequest(action, params, sessionId) {
         } catch {}
         await cdpSend(tabIdA, "DOM.focus", { backendNodeId });
         if (params.clear !== false) {
-          await cdpKeyPress(tabIdA, "a", MODIFIER_BITS.Control);
+          await cdpKeyPress(tabIdA, "a", primaryModifier);
           await cdpKeyPress(tabIdA, "Backspace");
         }
         await cdpType(tabIdA, params.text);
