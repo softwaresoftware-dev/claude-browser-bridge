@@ -570,17 +570,17 @@ async function axFind(tabId, role, name) {
     for (const child of node.childFrames || []) collect(child);
   })((await cdpSend(tabId, "Page.getFrameTree")).frameTree);
 
+  // Name is the primary discriminator; role is a SOFT filter. observe reports
+  // the DOM `role` *attribute*, but the a11y tree exposes the *computed* role
+  // — for many controls these differ (a search box's attribute role is the
+  // "search" landmark, its computed role is "searchbox"/"combobox"). So a role
+  // value copied from observe often won't equal the computed role. We match on
+  // name, then narrow by role only if a candidate actually has that computed
+  // role; otherwise role is ignored rather than causing a false miss.
   const needle = name ? name.toLowerCase() : null;
-  const matches = (n) => {
-    if (n.ignored || !n.backendDOMNodeId) return false;
-    if (role && !(n.role && n.role.value === role)) return false;
-    if (needle) {
-      const nm = n.name && n.name.value;
-      if (typeof nm !== "string") return false;
-      if (nm !== name && !nm.toLowerCase().includes(needle)) return false;
-    }
-    return true;
-  };
+  const roleOf = (n) => (n.role && n.role.value) || null;
+  const nameOf = (n) => (n.name && typeof n.name.value === "string" ? n.name.value : null);
+  const usable = (n) => !n.ignored && n.backendDOMNodeId;
 
   for (const frameId of frameIds) {
     let nodes;
@@ -589,12 +589,28 @@ async function axFind(tabId, role, name) {
     } catch {
       continue; // frame gone or not accessible — keep looking
     }
-    // Prefer an exact accessible-name match over a substring match.
-    let hit = name
-      ? (nodes || []).find((n) => matches(n) && n.name && n.name.value === name)
-      : null;
-    if (!hit) hit = (nodes || []).find(matches);
-    if (hit) return hit.backendDOMNodeId;
+    nodes = (nodes || []).filter(usable);
+
+    let candidates;
+    if (needle) {
+      const exact = nodes.filter((n) => nameOf(n) === name);
+      const substr = nodes.filter((n) => {
+        const nm = nameOf(n);
+        return nm && nm !== name && nm.toLowerCase().includes(needle);
+      });
+      candidates = exact.length ? exact : substr;
+    } else {
+      // role-only query
+      candidates = role ? nodes.filter((n) => roleOf(n) === role) : nodes;
+    }
+    if (!candidates.length) continue;
+
+    // Narrow by computed role only if it actually helps (soft filter).
+    if (role && needle) {
+      const roleMatch = candidates.filter((n) => roleOf(n) === role);
+      if (roleMatch.length) candidates = roleMatch;
+    }
+    return candidates[0].backendDOMNodeId;
   }
   throw new Error(`Element not found by role/name: role=${role || "*"} name=${name ? JSON.stringify(name) : "*"}`);
 }
