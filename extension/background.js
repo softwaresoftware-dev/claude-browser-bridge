@@ -352,32 +352,6 @@ async function execInTab(tabId, func, args = []) {
   return frame.result;
 }
 
-async function execInTabMainWorld(tabId, func, args = []) {
-  const safeArgs = args.map((a) => (a === undefined ? null : a));
-  let results;
-  try {
-    results = await chrome.scripting.executeScript({
-      target: { tabId },
-      func,
-      args: safeArgs,
-      world: "MAIN",
-    });
-  } catch (err) {
-    if (err.message.includes("Cannot access")) {
-      throw new Error(`Cannot execute script on this page (chrome://, extensions, or restricted URL)`);
-    }
-    if (err.message.includes("No tab with id")) {
-      throw new Error(`Tab ${tabId} was closed during operation`);
-    }
-    throw err;
-  }
-  if (!results || results.length === 0) throw new Error("Script execution returned no results");
-  const frame = results[0];
-  if (frame.error) {
-    throw new Error(frame.error.message || String(frame.error));
-  }
-  return frame.result;
-}
 
 // --- CDP (Chrome DevTools Protocol) helpers for trusted input events ---
 
@@ -494,11 +468,17 @@ async function cdpType(tabId, text) {
   await attachDebugger(tabId);
   const normalized = text.replace(/\r\n/g, "\n");
   return withInputLock(tabId, async () => {
-    for (const char of normalized) {
-      if (char === "\n" || char === "\r") {
-        // A newline isn't a typeable character — dispatching it as text gets
-        // silently dropped. Synthesize a real Enter press so textareas and
-        // contenteditables get an actual line break.
+    // Input.insertText inserts a whole segment atomically into the focused
+    // element (like a paste) — orders of magnitude faster than per-character
+    // key events on long text, and still fires input events. Newlines can't
+    // be inserted as text; each one becomes a real Enter press so textareas
+    // and contenteditables get an actual line/paragraph break.
+    const segments = normalized.split("\n");
+    for (let i = 0; i < segments.length; i++) {
+      if (segments[i]) {
+        await cdpSend(tabId, "Input.insertText", { text: segments[i] });
+      }
+      if (i < segments.length - 1) {
         await cdpSend(tabId, "Input.dispatchKeyEvent", {
           type: "keyDown", key: "Enter", code: "Enter",
           windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13,
@@ -508,16 +488,123 @@ async function cdpType(tabId, text) {
           type: "keyUp", key: "Enter", code: "Enter",
           windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13,
         });
-        continue;
       }
-      await cdpSend(tabId, "Input.dispatchKeyEvent", {
-        type: "keyDown", text: char, unmodifiedText: char,
-      });
-      await cdpSend(tabId, "Input.dispatchKeyEvent", {
-        type: "keyUp", text: char, unmodifiedText: char,
-      });
     }
   });
+}
+
+// Named keys for press_key / clear flows. [key, code, windowsVirtualKeyCode, text?]
+const NAMED_KEYS = {
+  Enter: ["Enter", "Enter", 13, "\r"],
+  Tab: ["Tab", "Tab", 9],
+  Escape: ["Escape", "Escape", 27],
+  Backspace: ["Backspace", "Backspace", 8],
+  Delete: ["Delete", "Delete", 46],
+  ArrowUp: ["ArrowUp", "ArrowUp", 38],
+  ArrowDown: ["ArrowDown", "ArrowDown", 40],
+  ArrowLeft: ["ArrowLeft", "ArrowLeft", 37],
+  ArrowRight: ["ArrowRight", "ArrowRight", 39],
+  Home: ["Home", "Home", 36],
+  End: ["End", "End", 35],
+  PageUp: ["PageUp", "PageUp", 33],
+  PageDown: ["PageDown", "PageDown", 34],
+  Space: [" ", "Space", 32, " "],
+};
+
+// Modifier bitmask per CDP Input.dispatchKeyEvent: Alt=1, Ctrl=2, Meta=4, Shift=8
+const MODIFIER_BITS = { Alt: 1, Control: 2, Ctrl: 2, Meta: 4, Cmd: 4, Shift: 8 };
+
+async function cdpKeyPress(tabId, keyName, modifiers = 0) {
+  await attachDebugger(tabId);
+  let def = NAMED_KEYS[keyName];
+  if (!def && keyName.length === 1) {
+    const upper = keyName.toUpperCase();
+    const code = /[A-Z]/.test(upper) ? `Key${upper}` : /[0-9]/.test(upper) ? `Digit${upper}` : "";
+    def = [keyName, code, upper.charCodeAt(0), keyName];
+  }
+  if (!def) throw new Error(`Unknown key: ${keyName}`);
+  const [key, code, vk, text] = def;
+  const down = {
+    type: "keyDown", key, code, modifiers,
+    windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk,
+  };
+  // Only include text when the press should produce a character — a key held
+  // under Ctrl/Alt/Meta is a shortcut, not input.
+  if (text && !(modifiers & (MODIFIER_BITS.Alt | MODIFIER_BITS.Control | MODIFIER_BITS.Meta))) {
+    down.text = text;
+    down.unmodifiedText = text;
+  }
+  return withInputLock(tabId, async () => {
+    await cdpSend(tabId, "Input.dispatchKeyEvent", down);
+    await cdpSend(tabId, "Input.dispatchKeyEvent", {
+      type: "keyUp", key, code, modifiers,
+      windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk,
+    });
+  });
+}
+
+// --- Accessibility-tree addressing ---
+// Resolve an element by ARIA role + accessible name via the CDP Accessibility
+// domain. The a11y tree is built from the *rendered* page, so it spans open
+// shadow roots and same-process iframes, and survives DOM churn — pages keep
+// roles and names stable because screen readers depend on them. This is the
+// most robust addressing scheme for hostile SPAs (LinkedIn's composer).
+async function axFind(tabId, role, name) {
+  await attachDebugger(tabId);
+  await cdpSend(tabId, "DOM.enable");
+  await cdpSend(tabId, "Accessibility.enable");
+
+  // Each frame has its own AX tree — a query rooted at the main document does
+  // not descend into iframe documents. Walk the frame tree and match in each,
+  // main frame first.
+  const frameIds = [];
+  (function collect(node) {
+    frameIds.push(node.frame.id);
+    for (const child of node.childFrames || []) collect(child);
+  })((await cdpSend(tabId, "Page.getFrameTree")).frameTree);
+
+  const needle = name ? name.toLowerCase() : null;
+  const matches = (n) => {
+    if (n.ignored || !n.backendDOMNodeId) return false;
+    if (role && !(n.role && n.role.value === role)) return false;
+    if (needle) {
+      const nm = n.name && n.name.value;
+      if (typeof nm !== "string") return false;
+      if (nm !== name && !nm.toLowerCase().includes(needle)) return false;
+    }
+    return true;
+  };
+
+  for (const frameId of frameIds) {
+    let nodes;
+    try {
+      ({ nodes } = await cdpSend(tabId, "Accessibility.getFullAXTree", { frameId }));
+    } catch {
+      continue; // frame gone or not accessible — keep looking
+    }
+    // Prefer an exact accessible-name match over a substring match.
+    let hit = name
+      ? (nodes || []).find((n) => matches(n) && n.name && n.name.value === name)
+      : null;
+    if (!hit) hit = (nodes || []).find(matches);
+    if (hit) return hit.backendDOMNodeId;
+  }
+  throw new Error(`Element not found by role/name: role=${role || "*"} name=${name ? JSON.stringify(name) : "*"}`);
+}
+
+async function axCenter(tabId, backendNodeId) {
+  try {
+    await cdpSend(tabId, "DOM.scrollIntoViewIfNeeded", { backendNodeId });
+  } catch {
+    // Non-scrollable or already visible — box model below still works.
+  }
+  const { model } = await cdpSend(tabId, "DOM.getBoxModel", { backendNodeId });
+  const q = model.content; // quad: [x1,y1, x2,y2, x3,y3, x4,y4]
+  return { x: Math.round((q[0] + q[4]) / 2), y: Math.round((q[1] + q[5]) / 2) };
+}
+
+function axLabel(params) {
+  return `role=${params.role || "*"} name=${params.name || "*"}`;
 }
 
 async function cdpPress(tabId, key, code, keyCode) {
@@ -729,8 +816,15 @@ async function handleRequest(action, params, sessionId) {
     }
 
     case "click": {
+      const tabId0 = await resolveTabId(params.tab_id, sessionId);
+      if (params.role || params.name) {
+        const backendNodeId = await axFind(tabId0, params.role, params.name);
+        const { x, y } = await axCenter(tabId0, backendNodeId);
+        await cdpClick(tabId0, x, y);
+        return { clicked: axLabel(params), x, y, method: "a11y" };
+      }
       const selector = resolveTargetSelector(params);
-      const tabId = await resolveTabId(params.tab_id, sessionId);
+      const tabId = tabId0;
       // Attach before bbox query so backgrounded tabs (LinkedIn etc.) report
       // real coordinates instead of zeros.
       await attachDebugger(tabId);
@@ -748,9 +842,24 @@ async function handleRequest(action, params, sessionId) {
     }
 
     case "type": {
-      const selector = resolveTargetSelector(params);
       if (params.text === undefined || params.text === null) throw new Error("Missing required parameter: text");
 
+      if (params.role || params.name) {
+        const tabIdA = await resolveTabId(params.tab_id, sessionId);
+        const backendNodeId = await axFind(tabIdA, params.role, params.name);
+        try {
+          await cdpSend(tabIdA, "DOM.scrollIntoViewIfNeeded", { backendNodeId });
+        } catch {}
+        await cdpSend(tabIdA, "DOM.focus", { backendNodeId });
+        if (params.clear !== false) {
+          await cdpKeyPress(tabIdA, "a", MODIFIER_BITS.Control);
+          await cdpKeyPress(tabIdA, "Backspace");
+        }
+        await cdpType(tabIdA, params.text);
+        return { typed: params.text, target: axLabel(params), method: "a11y" };
+      }
+
+      const selector = resolveTargetSelector(params);
       const tabId = await resolveTabId(params.tab_id, sessionId);
       await attachDebugger(tabId);
       let method = "cdp";
@@ -828,27 +937,44 @@ async function handleRequest(action, params, sessionId) {
       const code = params.code || params.expression;
       if (!code) throw new Error("Missing required parameter: code (or expression)");
       const tabId = await resolveTabId(params.tab_id, sessionId);
-      // chrome.scripting.executeScript swallows thrown errors from the injected
-      // function into a frame.result of undefined. Catch in-page and surface
-      // explicitly so callers can rely on rejection semantics.
-      const result = await execInTabMainWorld(tabId, (c) => {
-        try {
-          // eslint-disable-next-line no-eval
-          return { __bb_ok: true, value: eval(c) };
-        } catch (e) {
-          return { __bb_ok: false, error: e && (e.message || String(e)) };
-        }
-      }, [code]);
-      if (result && result.__bb_ok === false) {
-        throw new Error(`eval_js: ${result.error}`);
+      // Runtime.evaluate through the debugger is exempt from the page's CSP —
+      // unlike MAIN-world eval() injection, which sites like LinkedIn block
+      // with script-src that lacks unsafe-eval.
+      await attachDebugger(tabId);
+      const res = await cdpSend(tabId, "Runtime.evaluate", {
+        expression: code,
+        returnByValue: true,
+        awaitPromise: true,
+      });
+      if (res.exceptionDetails) {
+        const d = res.exceptionDetails;
+        const raw = (d.exception && (d.exception.description || d.exception.value)) || d.text || "evaluation failed";
+        throw new Error(`eval_js: ${String(raw).split("\n")[0]}`);
       }
-      if (result && result.__bb_ok === true) {
-        // `value: undefined` is dropped during cross-context serialization; the
-        // pre-wrapper code returned undefined directly which crossed back as
-        // null. Preserve that semantic.
-        return "value" in result ? result.value : null;
+      // Undefined isn't serializable across the wire — preserve the historic
+      // null semantic.
+      return res.result && "value" in res.result ? res.result.value : null;
+    }
+
+    case "press_key": {
+      if (!params.key) throw new Error("Missing required parameter: key");
+      const tabId = await resolveTabId(params.tab_id, sessionId);
+      let modifiers = 0;
+      for (const mod of params.modifiers || []) {
+        const bit = MODIFIER_BITS[mod];
+        if (!bit) throw new Error(`Unknown modifier: ${mod}`);
+        modifiers |= bit;
       }
-      return result;
+      await cdpKeyPress(tabId, params.key, modifiers);
+      return { pressed: params.key, modifiers: params.modifiers || [] };
+    }
+
+    case "reload_extension": {
+      // Reply first, then reload — the response has to leave before the
+      // service worker dies. Reload picks up edited extension code from disk,
+      // which a browser restart alone does not reliably do (stale script cache).
+      setTimeout(() => chrome.runtime.reload(), 300);
+      return { reloading: true, version: chrome.runtime.getManifest().version };
     }
 
     case "fill_form": {
@@ -877,10 +1003,26 @@ async function handleRequest(action, params, sessionId) {
     }
 
     case "wait_for": {
-      if (!params.selector) throw new Error("Missing required parameter: selector");
+      if (!params.selector && !params.role && !params.name) {
+        throw new Error("Missing required parameter: selector (or role/name)");
+      }
       const tabId = await resolveTabId(params.tab_id, sessionId);
       await attachDebugger(tabId);
       const timeout = params.timeout || 10000;
+
+      if (params.role || params.name) {
+        const axDeadline = Date.now() + timeout;
+        for (;;) {
+          try {
+            await axFind(tabId, params.role, params.name);
+            return { found: true, target: axLabel(params) };
+          } catch {
+            // Not there yet — keep polling.
+          }
+          if (Date.now() >= axDeadline) throw new Error(`Timed out waiting for: ${axLabel(params)}`);
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      }
 
       // Poll across all frames — a MutationObserver can't see into iframes
       // or shadow roots, so a sweep every 250ms is the reliable option.

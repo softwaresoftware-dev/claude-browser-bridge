@@ -364,6 +364,76 @@ async function runTests() {
     assert(result.found, "should find iframe element");
   });
 
+  // ---- a11y addressing (role + name) ----
+  console.log(yellow("\n--- a11y addressing ---"));
+  await test("click by role+name", async () => {
+    await send("eval_js", { tab_id: tabId, code: `(() => { const b = document.getElementById('counter-btn'); b.dataset.count = '0'; b.textContent = 'Count: 0'; })()` });
+    const result = await send("click", { tab_id: tabId, role: "button", name: "Count: 0" });
+    assertEqual(result.method, "a11y");
+    const count = await send("eval_js", { tab_id: tabId, code: `document.getElementById('counter-btn').dataset.count` });
+    assertEqual(count, "1");
+  });
+
+  await test("type by role+name reaches shadow DOM", async () => {
+    const result = await send("type", { tab_id: tabId, role: "textbox", name: "shadow input", text: "via a11y" });
+    assertEqual(result.method, "a11y");
+    const val = await send("eval_js", { tab_id: tabId, code: `${shadowEval("#shadow-input")}.value` });
+    assertEqual(val, "via a11y");
+  });
+
+  await test("type by role+name reaches iframe", async () => {
+    await send("type", { tab_id: tabId, role: "textbox", name: "iframe input", text: "framed a11y" });
+    const val = await send("eval_js", { tab_id: tabId, code: `${frameEval("#iframe-input")}.value` });
+    assertEqual(val, "framed a11y");
+  });
+
+  await test("type by role+name with clear replaces content", async () => {
+    await send("type", { tab_id: tabId, role: "textbox", name: "shadow input", text: "replaced", clear: true });
+    const val = await send("eval_js", { tab_id: tabId, code: `${shadowEval("#shadow-input")}.value` });
+    assertEqual(val, "replaced");
+  });
+
+  await test("wait_for by role+name", async () => {
+    const result = await send("wait_for", { tab_id: tabId, role: "textbox", name: "shadow editor", timeout: 3000 });
+    assert(result.found, "should find by role+name");
+  });
+
+  await test("click by role+name for nonexistent throws", async () => {
+    try {
+      await send("click", { tab_id: tabId, role: "button", name: "No Such Button Anywhere" });
+      throw new Error("Should have thrown");
+    } catch (err) {
+      assert(err.message.includes("not found"), `Unexpected: ${err.message}`);
+    }
+  });
+
+  // ---- press_key ----
+  console.log(yellow("\n--- press_key ---"));
+  await test("press_key select-all + backspace clears input", async () => {
+    await send("type", { tab_id: tabId, selector: "#name-input", text: "wipe me", clear: true });
+    await send("click", { tab_id: tabId, selector: "#name-input" });
+    await send("press_key", { tab_id: tabId, key: "a", modifiers: ["Control"] });
+    await send("press_key", { tab_id: tabId, key: "Backspace" });
+    const val = await send("eval_js", { tab_id: tabId, code: `document.getElementById('name-input').value` });
+    assertEqual(val, "");
+  });
+
+  await test("press_key types a character into focused element", async () => {
+    await send("click", { tab_id: tabId, selector: "#name-input" });
+    await send("press_key", { tab_id: tabId, key: "x" });
+    const val = await send("eval_js", { tab_id: tabId, code: `document.getElementById('name-input').value` });
+    assertEqual(val, "x");
+  });
+
+  await test("press_key unknown key throws", async () => {
+    try {
+      await send("press_key", { tab_id: tabId, key: "NotAKey" });
+      throw new Error("Should have thrown");
+    } catch (err) {
+      assert(err.message.includes("Unknown key"), `Unexpected: ${err.message}`);
+    }
+  });
+
   // ---- fill_form ----
   console.log(yellow("\n--- fill_form ---"));
   await test("fill_form fills multiple fields", async () => {
