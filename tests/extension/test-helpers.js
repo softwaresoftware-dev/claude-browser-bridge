@@ -24,6 +24,7 @@ const EXTENSION_FILES = [
   "manifest.json",
   "observer.js",
   "observer-a11y.js",
+  "dom-utils.js",
 ];
 
 function copyExtension({ destDir, wsPort }) {

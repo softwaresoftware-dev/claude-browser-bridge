@@ -8,8 +8,38 @@
 
 function browserBridgeObserve(opts) {
   opts = opts || {};
-  const frameIndex = opts.frameIndex != null ? opts.frameIndex : 0;
   const viewportOnly = !!opts.viewportOnly;
+
+  // Frame identity and root-viewport offset. This function is injected into
+  // every frame; each invocation figures out where its frame sits. Hidden
+  // frames (display:none / opacity 0 preload frames) and cross-origin frames
+  // (offsets unknowable) return null and are dropped by the caller.
+  let frameIndex = 0;
+  let offsetX = 0, offsetY = 0;
+  let rootW = window.innerWidth, rootH = window.innerHeight;
+  if (window !== window.top) {
+    frameIndex = 1000 + Math.floor(Math.random() * 9000);
+    try {
+      for (let i = 0; i < window.top.frames.length; i++) {
+        if (window.top.frames[i] === window) { frameIndex = i + 1; break; }
+      }
+      let win = window;
+      while (win.frameElement) {
+        const cs = getComputedStyle(win.frameElement);
+        if (cs.display === "none" || cs.visibility === "hidden" || parseFloat(cs.opacity) === 0) {
+          return null;
+        }
+        const fr = win.frameElement.getBoundingClientRect();
+        offsetX += fr.left + (win.frameElement.clientLeft || 0);
+        offsetY += fr.top + (win.frameElement.clientTop || 0);
+        win = win.parent;
+      }
+      rootW = window.top.innerWidth;
+      rootH = window.top.innerHeight;
+    } catch {
+      return null;
+    }
+  }
 
   const BB_ATTR = "data-bb-id";
   const SKIP_TAGS = new Set([
@@ -87,8 +117,8 @@ function browserBridgeObserve(opts) {
   }
 
   function inViewport(rect) {
-    return rect.top < window.innerHeight && rect.bottom > 0
-        && rect.left < window.innerWidth && rect.right > 0;
+    return rect.top + offsetY < rootH && rect.bottom + offsetY > 0
+        && rect.left + offsetX < rootW && rect.right + offsetX > 0;
   }
 
   function accessibleName(el) {
@@ -110,9 +140,16 @@ function browserBridgeObserve(opts) {
     return null;
   }
 
-  for (const stale of document.querySelectorAll(`[${BB_ATTR}]`)) {
-    stale.removeAttribute(BB_ATTR);
-  }
+  // Clear stale ids everywhere we stamp them — including inside open shadow
+  // roots, which document.querySelectorAll can't reach.
+  (function clearStale(root) {
+    for (const stale of root.querySelectorAll(`[${BB_ATTR}]`)) {
+      stale.removeAttribute(BB_ATTR);
+    }
+    for (const host of root.querySelectorAll("*")) {
+      if (host.shadowRoot) clearStale(host.shadowRoot);
+    }
+  })(document);
 
   const elements = [];
   let nextIdx = 0;
@@ -144,8 +181,8 @@ function browserBridgeObserve(opts) {
           if (val) entry.value = val;
           if (tag === "a" && child.href) entry.href = child.href;
           entry.bbox = [
-            Math.round(rect.left),
-            Math.round(rect.top),
+            Math.round(rect.left + offsetX),
+            Math.round(rect.top + offsetY),
             Math.round(rect.width),
             Math.round(rect.height),
           ];

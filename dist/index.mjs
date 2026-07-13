@@ -21157,16 +21157,18 @@ function registerTools(server, send, getWarning = () => null) {
   );
   server.tool(
     "click",
-    "Click an element. Prefer `id` from observe (context-efficient); fall back to `selector` when needed.",
+    "Click an element. Most robust: `role`+`name` (accessibility tree \u2014 spans shadow DOM/iframes, survives DOM churn on hostile SPAs). Or `id` from observe, or a CSS `selector`.",
     {
       id: external_exports.string().optional().describe('Element id from observe, e.g. "0-12"'),
       selector: external_exports.string().optional().describe("CSS selector (use when no id is available)"),
+      role: external_exports.string().optional().describe('ARIA role, e.g. "button", "textbox", "link" \u2014 pair with name'),
+      name: external_exports.string().optional().describe("Accessible name (exact, falls back to substring match)"),
       tab_id: external_exports.number().optional().describe("Tab ID, omit for active tab")
     },
-    async ({ id, selector, tab_id }) => {
+    async ({ id, selector, role, name, tab_id }) => {
       sendEvent("tool_invoked", { tool: "click" });
       try {
-        const result = await send("click", { tab_id, id, selector });
+        const result = await send("click", { tab_id, id, selector, role, name });
         return { content: withWarning([{ type: "text", text: JSON.stringify(result) }]) };
       } catch (err) {
         sendEvent("tool_error", { tool: "click", error: err.message });
@@ -21176,21 +21178,57 @@ function registerTools(server, send, getWarning = () => null) {
   );
   server.tool(
     "type",
-    "Type text into an element. Prefer `id` from observe; fall back to `selector`.",
+    "Type text into an element (newlines become real Enter presses). Most robust: `role`+`name` (accessibility tree). Or `id` from observe, or a CSS `selector`.",
     {
       id: external_exports.string().optional().describe('Element id from observe, e.g. "0-12"'),
       selector: external_exports.string().optional().describe("CSS selector (use when no id is available)"),
-      text: external_exports.string().describe("Text to type"),
+      role: external_exports.string().optional().describe('ARIA role, e.g. "textbox" \u2014 pair with name'),
+      name: external_exports.string().optional().describe("Accessible name (exact, falls back to substring match)"),
+      text: external_exports.string().describe("Text to type; \\n produces a real line break"),
       clear: external_exports.boolean().default(true).describe("Clear existing value first"),
       tab_id: external_exports.number().optional().describe("Tab ID, omit for active tab")
     },
-    async ({ id, selector, text, clear, tab_id }) => {
+    async ({ id, selector, role, name, text, clear, tab_id }) => {
       sendEvent("tool_invoked", { tool: "type" });
       try {
-        const result = await send("type", { tab_id, id, selector, text, clear });
+        const result = await send("type", { tab_id, id, selector, role, name, text, clear });
         return { content: withWarning([{ type: "text", text: JSON.stringify(result) }]) };
       } catch (err) {
         sendEvent("tool_error", { tool: "type", error: err.message });
+        throw err;
+      }
+    }
+  );
+  server.tool(
+    "press_key",
+    "Press a keyboard key in the focused element \u2014 Enter, Tab, Escape, Backspace, Delete, arrows, Home/End, PageUp/PageDown, or a single character. Supports modifiers (e.g. Control+a to select all).",
+    {
+      key: external_exports.string().describe('Key to press: named key ("Enter", "Tab", "Escape", ...) or single character ("a")'),
+      modifiers: external_exports.array(external_exports.enum(["Control", "Alt", "Shift", "Meta"])).optional().describe("Held modifiers"),
+      tab_id: external_exports.number().optional().describe("Tab ID, omit for active tab")
+    },
+    async ({ key, modifiers, tab_id }) => {
+      sendEvent("tool_invoked", { tool: "press_key" });
+      try {
+        const result = await send("press_key", { tab_id, key, modifiers });
+        return { content: withWarning([{ type: "text", text: JSON.stringify(result) }]) };
+      } catch (err) {
+        sendEvent("tool_error", { tool: "press_key", error: err.message });
+        throw err;
+      }
+    }
+  );
+  server.tool(
+    "reload_extension",
+    "Reload the browser extension from disk (development). Use after editing extension code \u2014 a browser restart alone can serve stale cached scripts.",
+    {},
+    async () => {
+      sendEvent("tool_invoked", { tool: "reload_extension" });
+      try {
+        const result = await send("reload_extension", {});
+        return { content: withWarning([{ type: "text", text: JSON.stringify(result) }]) };
+      } catch (err) {
+        sendEvent("tool_error", { tool: "reload_extension", error: err.message });
         throw err;
       }
     }
@@ -21309,16 +21347,18 @@ function registerTools(server, send, getWarning = () => null) {
   );
   server.tool(
     "wait_for",
-    "Wait for a CSS selector to appear on the page",
+    "Wait for an element to appear \u2014 by CSS selector, or by accessibility role/name (robust on shadow DOM, iframes, hostile SPAs)",
     {
-      selector: external_exports.string().describe("CSS selector to wait for"),
+      selector: external_exports.string().optional().describe("CSS selector to wait for"),
+      role: external_exports.string().optional().describe('ARIA role, e.g. "textbox" \u2014 pair with name'),
+      name: external_exports.string().optional().describe("Accessible name (exact, falls back to substring match)"),
       timeout: external_exports.number().default(1e4).describe("Max wait time in ms"),
       tab_id: external_exports.number().optional().describe("Tab ID, omit for active tab")
     },
-    async ({ selector, timeout, tab_id }) => {
+    async ({ selector, role, name, timeout, tab_id }) => {
       sendEvent("tool_invoked", { tool: "wait_for" });
       try {
-        const result = await send("wait_for", { tab_id, selector, timeout }, timeout + 5e3);
+        const result = await send("wait_for", { tab_id, selector, role, name, timeout }, timeout + 5e3);
         return { content: withWarning([{ type: "text", text: JSON.stringify(result) }]) };
       } catch (err) {
         sendEvent("tool_error", { tool: "wait_for", error: err.message });

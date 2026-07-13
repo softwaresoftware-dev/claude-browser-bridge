@@ -86,6 +86,22 @@ When working in this repo, you can edit and test daemon code without restarting 
 
 **What needs a Claude Code restart:** `index.js`, `tools.js` (tool schemas), `ipc.js` — these are loaded once by the MCP client process at session start.
 
+**Extension code (background.js etc.) — beware the stale script cache.** Brave/Chrome caches extension service-worker scripts and can keep serving old code across full browser restarts, even after a manifest version bump. After editing extension files, call the `reload_extension` tool (or click reload on `brave://extensions`) and confirm the reported version. Do NOT trust a browser restart to pick up changes — this silently ran stale code through multiple "verified" test rounds once.
+
+## Element addressing — prefer role+name
+
+`click`, `type`, and `wait_for` accept `role` + `name` (ARIA role and accessible name, resolved via the CDP Accessibility tree). This is the most robust addressing scheme: it spans open shadow roots and same-process iframes, and survives DOM churn on hostile SPAs — sites keep roles/names stable because screen readers depend on them. LinkedIn's post composer, which defeats every CSS-selector strategy, resolves instantly as `role: "textbox", name: "Text editor for creating content"`. Fall back to observe `id`s, then CSS selectors. When ids go stale mid-flow, click/type automatically fall back to the element's last-observed screen coordinates.
+
+## Escape hatch: Playwright over CDP
+
+If a page defeats the bridge entirely, drive the user's real browser with Playwright:
+
+1. Relaunch the browser with `--remote-debugging-port=9222`
+2. `python -c` / script: `sync_playwright()` → `p.chromium.connect_over_cdp("http://127.0.0.1:9222")` → `browser.contexts[0]` (the real profile, real sessions)
+3. Address elements with `page.get_by_role(role, name=...)`; type with `page.keyboard.insert_text(...)` + `page.keyboard.press("Enter")` for line breaks
+
+`uv run --with playwright python script.py` works without installing browsers (CDP connect needs no bundled browser). Iterate script → run → screenshot; each cycle is seconds.
+
 ## Commands
 
 - `make dev` — run the MCP server directly (for testing, normally Claude Code launches it)
@@ -103,13 +119,15 @@ When working in this repo, you can edit and test daemon code without restarting 
 | `observe` | Screenshot + numbered interactive elements + URL/scroll state |
 | `observe_a11y` | Text-only hierarchical semantic outline (no screenshot, ~10x smaller) — for fast multi-step form/navigation flows |
 | `navigate` | Navigate to a URL |
-| `click` | Click element by CSS selector |
-| `type` | Type text into an input |
-| `eval_js` | Execute JS in page context |
+| `click` | Click element by role+name (a11y tree), observe id, or CSS selector |
+| `type` | Type text into an element by role+name, id, or selector (newlines → Enter) |
+| `press_key` | Press a key in the focused element (Enter, Tab, Escape, arrows, chars) with modifiers |
+| `eval_js` | Execute JS in page context (via CDP Runtime.evaluate — CSP-exempt) |
 | `fill_form` | Fill multiple form fields |
 | `get_element_info` | Get element attributes/position |
-| `wait_for` | Wait for selector to appear |
+| `wait_for` | Wait for an element by selector or role+name |
 | `scroll` | Scroll page or element |
+| `reload_extension` | Reload the extension from disk (development) |
 
 ## Multi-Session Tab Isolation
 

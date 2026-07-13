@@ -49,5 +49,37 @@
   <!-- Edge case elements -->
   <div id="hidden-el">This is hidden</div>
   <div id="zero-size">Zero size</div>
+
+  <div class="test-section">
+    <h2>Shadow DOM Test</h2>
+    <div id="shadow-host"></div>
+    <script>
+      const shadowRoot = document.getElementById('shadow-host').attachShadow({ mode: 'open' });
+      shadowRoot.innerHTML = `
+        <input type="text" id="shadow-input" aria-label="shadow input" placeholder="Inside shadow root" />
+        <button id="shadow-btn">Shadow Click</button>
+        <div id="shadow-editor" contenteditable="true" role="textbox" aria-label="shadow editor" style="border: 1px solid #999; min-height: 40px; padding: 4px;"></div>
+      `;
+      shadowRoot.querySelector('#shadow-btn').addEventListener('click', function () {
+        this.textContent = 'Shadow Clicked!';
+      });
+    </script>
+  </div>
+
+  <div class="test-section">
+    <h2>Multiline Test</h2>
+    <textarea id="multiline-input" rows="4" cols="40"></textarea>
+  </div>
+
+  <div class="test-section">
+    <h2>Iframe Test</h2>
+    <!-- srcdoc inherits the parent origin — same-origin iframe, like the
+         real-world case (LinkedIn's /preload/ composer iframe). -->
+    <iframe id="test-iframe" style="width: 420px; height: 120px;" srcdoc="
+      <input type='text' id='iframe-input' aria-label='iframe input' placeholder='Inside iframe' />
+      <button id='iframe-btn' onclick='this.textContent = &quot;Iframe Clicked!&quot;'>Iframe Click</button>
+      <textarea id='iframe-textarea' rows='3' cols='30'></textarea>
+    "></iframe>
+  </div>
 </body>
 </html>

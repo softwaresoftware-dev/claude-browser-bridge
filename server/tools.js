@@ -137,16 +137,18 @@ export function registerTools(server, send, getWarning = () => null) {
 
   server.tool(
     "click",
-    "Click an element. Prefer `id` from observe (context-efficient); fall back to `selector` when needed.",
+    "Click an element. Most robust: `role`+`name` (accessibility tree — spans shadow DOM/iframes, survives DOM churn on hostile SPAs). Or `id` from observe, or a CSS `selector`.",
     {
       id: z.string().optional().describe('Element id from observe, e.g. "0-12"'),
       selector: z.string().optional().describe("CSS selector (use when no id is available)"),
+      role: z.string().optional().describe('ARIA role, e.g. "button", "textbox", "link" — pair with name'),
+      name: z.string().optional().describe("Accessible name (exact, falls back to substring match)"),
       tab_id: z.number().optional().describe("Tab ID, omit for active tab"),
     },
-    async ({ id, selector, tab_id }) => {
+    async ({ id, selector, role, name, tab_id }) => {
       sendEvent("tool_invoked", { tool: "click" });
       try {
-        const result = await send("click", { tab_id, id, selector });
+        const result = await send("click", { tab_id, id, selector, role, name });
         return { content: withWarning([{ type: "text", text: JSON.stringify(result) }]) };
       } catch (err) {
         sendEvent("tool_error", { tool: "click", error: err.message });
@@ -157,21 +159,59 @@ export function registerTools(server, send, getWarning = () => null) {
 
   server.tool(
     "type",
-    "Type text into an element. Prefer `id` from observe; fall back to `selector`.",
+    "Type text into an element (newlines become real Enter presses). Most robust: `role`+`name` (accessibility tree). Or `id` from observe, or a CSS `selector`.",
     {
       id: z.string().optional().describe('Element id from observe, e.g. "0-12"'),
       selector: z.string().optional().describe("CSS selector (use when no id is available)"),
-      text: z.string().describe("Text to type"),
+      role: z.string().optional().describe('ARIA role, e.g. "textbox" — pair with name'),
+      name: z.string().optional().describe("Accessible name (exact, falls back to substring match)"),
+      text: z.string().describe("Text to type; \\n produces a real line break"),
       clear: z.boolean().default(true).describe("Clear existing value first"),
       tab_id: z.number().optional().describe("Tab ID, omit for active tab"),
     },
-    async ({ id, selector, text, clear, tab_id }) => {
+    async ({ id, selector, role, name, text, clear, tab_id }) => {
       sendEvent("tool_invoked", { tool: "type" });
       try {
-        const result = await send("type", { tab_id, id, selector, text, clear });
+        const result = await send("type", { tab_id, id, selector, role, name, text, clear });
         return { content: withWarning([{ type: "text", text: JSON.stringify(result) }]) };
       } catch (err) {
         sendEvent("tool_error", { tool: "type", error: err.message });
+        throw err;
+      }
+    }
+  );
+
+  server.tool(
+    "press_key",
+    "Press a keyboard key in the focused element — Enter, Tab, Escape, Backspace, Delete, arrows, Home/End, PageUp/PageDown, or a single character. Supports modifiers (e.g. Control+a to select all).",
+    {
+      key: z.string().describe('Key to press: named key ("Enter", "Tab", "Escape", ...) or single character ("a")'),
+      modifiers: z.array(z.enum(["Control", "Alt", "Shift", "Meta"])).optional().describe("Held modifiers"),
+      tab_id: z.number().optional().describe("Tab ID, omit for active tab"),
+    },
+    async ({ key, modifiers, tab_id }) => {
+      sendEvent("tool_invoked", { tool: "press_key" });
+      try {
+        const result = await send("press_key", { tab_id, key, modifiers });
+        return { content: withWarning([{ type: "text", text: JSON.stringify(result) }]) };
+      } catch (err) {
+        sendEvent("tool_error", { tool: "press_key", error: err.message });
+        throw err;
+      }
+    }
+  );
+
+  server.tool(
+    "reload_extension",
+    "Reload the browser extension from disk (development). Use after editing extension code — a browser restart alone can serve stale cached scripts.",
+    {},
+    async () => {
+      sendEvent("tool_invoked", { tool: "reload_extension" });
+      try {
+        const result = await send("reload_extension", {});
+        return { content: withWarning([{ type: "text", text: JSON.stringify(result) }]) };
+      } catch (err) {
+        sendEvent("tool_error", { tool: "reload_extension", error: err.message });
         throw err;
       }
     }
@@ -298,16 +338,18 @@ export function registerTools(server, send, getWarning = () => null) {
 
   server.tool(
     "wait_for",
-    "Wait for a CSS selector to appear on the page",
+    "Wait for an element to appear — by CSS selector, or by accessibility role/name (robust on shadow DOM, iframes, hostile SPAs)",
     {
-      selector: z.string().describe("CSS selector to wait for"),
+      selector: z.string().optional().describe("CSS selector to wait for"),
+      role: z.string().optional().describe('ARIA role, e.g. "textbox" — pair with name'),
+      name: z.string().optional().describe("Accessible name (exact, falls back to substring match)"),
       timeout: z.number().default(10000).describe("Max wait time in ms"),
       tab_id: z.number().optional().describe("Tab ID, omit for active tab"),
     },
-    async ({ selector, timeout, tab_id }) => {
+    async ({ selector, role, name, timeout, tab_id }) => {
       sendEvent("tool_invoked", { tool: "wait_for" });
       try {
-        const result = await send("wait_for", { tab_id, selector, timeout }, timeout + 5000);
+        const result = await send("wait_for", { tab_id, selector, role, name, timeout }, timeout + 5000);
         return { content: withWarning([{ type: "text", text: JSON.stringify(result) }]) };
       } catch (err) {
         sendEvent("tool_error", { tool: "wait_for", error: err.message });
