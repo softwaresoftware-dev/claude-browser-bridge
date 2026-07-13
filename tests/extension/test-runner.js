@@ -276,6 +276,94 @@ async function runTests() {
     }
   });
 
+  await test("type preserves newlines in textarea", async () => {
+    await send("type", { tab_id: tabId, selector: "#multiline-input", text: "line one\nline two\n\nline four" });
+    const val = await send("eval_js", { tab_id: tabId, code: `document.getElementById('multiline-input').value` });
+    assertEqual(val, "line one\nline two\n\nline four");
+  });
+
+  // ---- shadow DOM ----
+  console.log(yellow("\n--- shadow DOM ---"));
+  const shadowEval = (inner) => `document.getElementById('shadow-host').shadowRoot.querySelector(${JSON.stringify(inner)})`;
+
+  await test("observe lists elements inside shadow root", async () => {
+    const result = await send("observe", { tab_id: tabId, include_screenshot: false });
+    const input = result.elements.find((e) => e.name === "shadow input");
+    assert(input, "observe should list the shadow input");
+  });
+
+  await test("type into input inside shadow root", async () => {
+    await send("type", { tab_id: tabId, selector: "#shadow-input", text: "pierced" });
+    const val = await send("eval_js", { tab_id: tabId, code: `${shadowEval("#shadow-input")}.value` });
+    assertEqual(val, "pierced");
+  });
+
+  await test("click button inside shadow root via bb-id", async () => {
+    const obs = await send("observe", { tab_id: tabId, include_screenshot: false });
+    const btn = obs.elements.find((e) => e.name === "Shadow Click");
+    assert(btn, "observe should list the shadow button");
+    await send("click", { tab_id: tabId, id: btn.id });
+    const text = await send("eval_js", { tab_id: tabId, code: `${shadowEval("#shadow-btn")}.textContent` });
+    assertEqual(text, "Shadow Clicked!");
+  });
+
+  await test("type newlines into contenteditable inside shadow root", async () => {
+    await send("type", { tab_id: tabId, selector: "#shadow-editor", text: "para one\npara two" });
+    const text = await send("eval_js", { tab_id: tabId, code: `${shadowEval("#shadow-editor")}.innerText` });
+    assert(text.includes("para one") && text.includes("para two"), `innerText: ${JSON.stringify(text)}`);
+    assert(text.includes("\n"), `expected a line break between paragraphs, got: ${JSON.stringify(text)}`);
+  });
+
+  await test("type clear=true replaces contenteditable content", async () => {
+    await send("type", { tab_id: tabId, selector: "#shadow-editor", text: "fresh", clear: true });
+    const text = await send("eval_js", { tab_id: tabId, code: `${shadowEval("#shadow-editor")}.innerText` });
+    assertEqual(text.trim(), "fresh");
+  });
+
+  await test("get_element_info pierces shadow root", async () => {
+    const info = await send("get_element_info", { tab_id: tabId, selector: "#shadow-input" });
+    assertEqual(info.tagName, "input");
+  });
+
+  await test("wait_for resolves for element inside shadow root", async () => {
+    const result = await send("wait_for", { tab_id: tabId, selector: "#shadow-editor", timeout: 3000 });
+    assert(result.found, "should find shadow element");
+  });
+
+  // ---- iframes ----
+  console.log(yellow("\n--- iframes ---"));
+  const frameEval = (inner) => `document.getElementById('test-iframe').contentDocument.querySelector(${JSON.stringify(inner)})`;
+
+  await test("observe lists elements inside same-origin iframe", async () => {
+    const obs = await send("observe", { tab_id: tabId, include_screenshot: false });
+    const input = obs.elements.find((e) => e.name === "iframe input");
+    assert(input, "observe should list the iframe input");
+    assert(!input.id.startsWith("0-"), `iframe element should have nonzero frame index, got ${input.id}`);
+  });
+
+  await test("type into input inside iframe via selector", async () => {
+    await send("type", { tab_id: tabId, selector: "#iframe-input", text: "framed" });
+    const val = await send("eval_js", { tab_id: tabId, code: `${frameEval("#iframe-input")}.value` });
+    assertEqual(val, "framed");
+  });
+
+  await test("click button inside iframe translates coordinates", async () => {
+    await send("click", { tab_id: tabId, selector: "#iframe-btn" });
+    const text = await send("eval_js", { tab_id: tabId, code: `${frameEval("#iframe-btn")}.textContent` });
+    assertEqual(text, "Iframe Clicked!");
+  });
+
+  await test("type newlines into textarea inside iframe", async () => {
+    await send("type", { tab_id: tabId, selector: "#iframe-textarea", text: "one\ntwo" });
+    const val = await send("eval_js", { tab_id: tabId, code: `${frameEval("#iframe-textarea")}.value` });
+    assertEqual(val, "one\ntwo");
+  });
+
+  await test("wait_for element inside iframe", async () => {
+    const result = await send("wait_for", { tab_id: tabId, selector: "#iframe-btn", timeout: 3000 });
+    assert(result.found, "should find iframe element");
+  });
+
   // ---- fill_form ----
   console.log(yellow("\n--- fill_form ---"));
   await test("fill_form fills multiple fields", async () => {

@@ -1,5 +1,6 @@
 importScripts("observer.js");
 importScripts("observer-a11y.js");
+importScripts("dom-utils.js");
 
 const WS_URL = "ws://127.0.0.1:7225";
 
@@ -491,8 +492,24 @@ async function cdpClick(tabId, x, y) {
 
 async function cdpType(tabId, text) {
   await attachDebugger(tabId);
+  const normalized = text.replace(/\r\n/g, "\n");
   return withInputLock(tabId, async () => {
-    for (const char of text) {
+    for (const char of normalized) {
+      if (char === "\n" || char === "\r") {
+        // A newline isn't a typeable character — dispatching it as text gets
+        // silently dropped. Synthesize a real Enter press so textareas and
+        // contenteditables get an actual line break.
+        await cdpSend(tabId, "Input.dispatchKeyEvent", {
+          type: "keyDown", key: "Enter", code: "Enter",
+          windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13,
+          text: "\r", unmodifiedText: "\r",
+        });
+        await cdpSend(tabId, "Input.dispatchKeyEvent", {
+          type: "keyUp", key: "Enter", code: "Enter",
+          windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13,
+        });
+        continue;
+      }
       await cdpSend(tabId, "Input.dispatchKeyEvent", {
         type: "keyDown", text: char, unmodifiedText: char,
       });
@@ -515,23 +532,102 @@ async function cdpPress(tabId, key, code, keyCode) {
   });
 }
 
-// Get element center coordinates for CDP click
-async function getElementCenter(tabId, selector) {
-  const result = await execInTab(tabId, (sel) => {
-    const el = document.querySelector(sel);
-    if (!el) return { __err: `Element not found: ${sel}` };
-    el.scrollIntoView({ block: "center" });
-    const rect = el.getBoundingClientRect();
-    if (rect.width === 0 && rect.height === 0) {
-      return { __err: `Element has zero size (hidden or collapsed): ${sel}` };
+// Run a function in every frame of the tab. Returns the raw per-frame
+// results (each with frameId). Frames the extension can't inject into are
+// simply absent from the results.
+async function execInTabFrames(tabId, func, args = []) {
+  const safeArgs = args.map((a) => (a === undefined ? null : a));
+  let results;
+  try {
+    results = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func,
+      args: safeArgs,
+    });
+  } catch (err) {
+    if (err.message.includes("Cannot access")) {
+      throw new Error(`Cannot execute script on this page (chrome://, extensions, or restricted URL)`);
     }
-    return {
-      x: Math.round(rect.left + rect.width / 2),
-      y: Math.round(rect.top + rect.height / 2),
-    };
-  }, [selector]);
-  if (result && result.__err) throw new Error(result.__err);
-  return result;
+    if (err.message.includes("No tab with id")) {
+      throw new Error(`Tab ${tabId} was closed during operation`);
+    }
+    throw err;
+  }
+  return results || [];
+}
+
+// Find which frame contains the element. Pages render UI in same-origin
+// iframes (LinkedIn's post composer lives in its /preload/ interop iframe),
+// so lookup must sweep every frame — main frame wins ties.
+async function locateFrame(tabId, selector) {
+  const results = await execInTabFrames(tabId, browserBridgeElementOp, [{ op: "exists", selector }]);
+  let invalid = null;
+  const hits = [];
+  for (const r of results) {
+    const v = r && r.result;
+    if (!v) continue;
+    if (v.__err) {
+      if (v.__err.startsWith("Invalid selector")) invalid = v.__err;
+      continue;
+    }
+    if (v.found) hits.push(r.frameId);
+  }
+  if (invalid) throw new Error(invalid);
+  if (hits.length === 0) throw new Error(`Element not found: ${selector}`);
+  return hits.includes(0) ? 0 : hits.sort((a, b) => a - b)[0];
+}
+
+// Two-phase element op: locate the frame that has the element, then run the
+// op only in that frame (avoids side effects like focus firing in frames
+// where the selector matches something else).
+async function runElementOp(tabId, opts) {
+  const frameId = await locateFrame(tabId, opts.selector);
+  const safeArgs = [opts].map((a) => (a === undefined ? null : a));
+  const results = await chrome.scripting.executeScript({
+    target: { tabId, frameIds: [frameId] },
+    func: browserBridgeElementOp,
+    args: safeArgs,
+  });
+  const v = results && results[0] && results[0].result;
+  if (v && v.__err) throw new Error(v.__err);
+  if (!v) throw new Error("Script execution returned no results");
+  return v;
+}
+
+// Get element center coordinates for CDP click (root-viewport coordinates,
+// translated through same-origin iframes by the "center" op).
+async function getElementCenter(tabId, selector) {
+  return runElementOp(tabId, { op: "center", selector });
+}
+
+// Last observe snapshot per tab: bbId → bbox. Some pages (LinkedIn's post
+// composer) continuously replace the DOM nodes of a surface, so an id
+// stamped by observe is gone by the next call and no selector — however
+// deep — resolves it. The bbox from the snapshot still points at the right
+// pixels, so click/type fall back to raw CDP input at those coordinates.
+// Stored in chrome.storage.session so it survives service worker restarts.
+async function saveObserveSnapshot(tabId, elements) {
+  const snap = {};
+  for (const el of elements) {
+    if (el.id && el.bbox) snap[el.id] = el.bbox;
+  }
+  try {
+    await chrome.storage.session.set({ [`bbSnap:${tabId}`]: snap });
+  } catch {
+    // storage.session unavailable — fallback simply won't have data
+  }
+}
+
+async function snapshotBboxCenter(tabId, bbId) {
+  try {
+    const key = `bbSnap:${tabId}`;
+    const data = await chrome.storage.session.get(key);
+    const bbox = data[key] && data[key][bbId];
+    if (!bbox) return null;
+    return { x: Math.round(bbox[0] + bbox[2] / 2), y: Math.round(bbox[1] + bbox[3] / 2) };
+  } catch {
+    return null;
+  }
 }
 
 // Accept either a bb-id (from observe) or a raw CSS selector, returning the
@@ -638,9 +734,17 @@ async function handleRequest(action, params, sessionId) {
       // Attach before bbox query so backgrounded tabs (LinkedIn etc.) report
       // real coordinates instead of zeros.
       await attachDebugger(tabId);
-      const { x, y } = await getElementCenter(tabId, selector);
+      let x, y, method = "cdp";
+      try {
+        ({ x, y } = await getElementCenter(tabId, selector));
+      } catch (err) {
+        const center = params.id ? await snapshotBboxCenter(tabId, params.id) : null;
+        if (!center) throw err;
+        ({ x, y } = center);
+        method = "cdp-bbox";
+      }
       await cdpClick(tabId, x, y);
-      return { clicked: selector, x, y, method: "cdp" };
+      return { clicked: selector, x, y, method };
     }
 
     case "type": {
@@ -649,29 +753,53 @@ async function handleRequest(action, params, sessionId) {
 
       const tabId = await resolveTabId(params.tab_id, sessionId);
       await attachDebugger(tabId);
-      const focusResult = await execInTab(tabId, (sel, clear) => {
-        const el = document.querySelector(sel);
-        if (!el) return { __err: `Element not found: ${sel}` };
-        el.focus();
-        if (clear) {
-          el.value = "";
-          el.dispatchEvent(new Event("input", { bubbles: true }));
+      let method = "cdp";
+      try {
+        await runElementOp(tabId, { op: "focus", selector, clear: params.clear !== false });
+      } catch (err) {
+        // Selector lookup failed — focus the element by clicking the center
+        // of its bbox from the last observe snapshot (no clear support here;
+        // there is no element handle to clear).
+        const center = params.id ? await snapshotBboxCenter(tabId, params.id) : null;
+        if (!center) {
+          let dbg = "";
+          if (params.id) {
+            try {
+              const all = await chrome.storage.session.get(null);
+              dbg = ` (bbox fallback unavailable: keys=${Object.keys(all).join(",") || "none"})`;
+            } catch (e2) {
+              dbg = ` (bbox fallback unavailable: storage.session: ${e2.message})`;
+            }
+          }
+          throw new Error(err.message + dbg);
         }
-        return { ok: true };
-      }, [selector, params.clear !== false]);
-      if (focusResult && focusResult.__err) throw new Error(focusResult.__err);
+        await cdpClick(tabId, center.x, center.y);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        method = "cdp-bbox";
+      }
       await cdpType(tabId, params.text);
-      return { typed: params.text, selector, method: "cdp" };
+      return { typed: params.text, selector, method };
     }
 
     case "observe": {
       const tabId = await resolveTabId(params.tab_id, sessionId);
       await attachDebugger(tabId);
       const opts = {
-        frameIndex: 0,
         viewportOnly: !!params.viewport_only,
       };
-      const result = await execInTab(tabId, browserBridgeObserve, [opts]);
+      // Observe every frame — pages like LinkedIn render whole surfaces (the
+      // post composer) in same-origin iframes. Each frame reports its own
+      // elements with root-viewport bboxes; hidden/cross-origin frames
+      // return null and are dropped.
+      const frameResults = await execInTabFrames(tabId, browserBridgeObserve, [opts]);
+      const frames = frameResults.map((r) => r && r.result).filter(Boolean);
+      const main = frames.find((f) => f.frameIndex === 0) || frames[0];
+      if (!main) throw new Error("observe returned no results");
+      const result = { ...main, elements: frames.flatMap((f) => f.elements) };
+
+      // Remember bboxes so click/type can fall back to coordinates when a
+      // page discards the stamped ids (see saveObserveSnapshot).
+      await saveObserveSnapshot(tabId, result.elements);
 
       if (params.include_screenshot !== false) {
         try {
@@ -729,51 +857,23 @@ async function handleRequest(action, params, sessionId) {
       }
       const tabId = await resolveTabId(params.tab_id, sessionId);
       await attachDebugger(tabId);
-      return await execInTab(tabId, (fields) => {
-        const results = [];
-        for (const { selector, value } of fields) {
-          const el = document.querySelector(selector);
-          if (!el) {
-            results.push({ selector, success: false, error: "Element not found" });
-            continue;
-          }
-          el.focus();
-          el.value = value;
-          el.dispatchEvent(new InputEvent("input", { bubbles: true, data: value, inputType: "insertText" }));
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-          results.push({ selector, success: true });
+      const results = [];
+      for (const { selector: fieldSel, value } of params.fields) {
+        try {
+          await runElementOp(tabId, { op: "fill_one", selector: fieldSel, value });
+          results.push({ selector: fieldSel, success: true });
+        } catch (err) {
+          results.push({ selector: fieldSel, success: false, error: err.message });
         }
-        return { filled: results.filter((r) => r.success).length, total: fields.length, results };
-      }, [params.fields]);
+      }
+      return { filled: results.filter((r) => r.success).length, total: params.fields.length, results };
     }
 
     case "get_element_info": {
       if (!params.selector) throw new Error("Missing required parameter: selector");
       const tabId = await resolveTabId(params.tab_id, sessionId);
       await attachDebugger(tabId);
-      const info = await execInTab(tabId, (selector) => {
-        let el;
-        try {
-          el = document.querySelector(selector);
-        } catch (e) {
-          return { __err: `Invalid selector: ${selector} (${e && (e.message || String(e))})` };
-        }
-        if (!el) return { __err: `Element not found: ${selector}` };
-        const rect = el.getBoundingClientRect();
-        const attrs = {};
-        for (const attr of el.attributes) attrs[attr.name] = attr.value;
-        return {
-          tagName: el.tagName.toLowerCase(),
-          id: el.id,
-          className: el.className,
-          text: el.innerText?.substring(0, 500),
-          attributes: attrs,
-          boundingRect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
-          isVisible: rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility !== "hidden",
-        };
-      }, [params.selector]);
-      if (info && info.__err) throw new Error(info.__err);
-      return info;
+      return await runElementOp(tabId, { op: "info", selector: params.selector });
     }
 
     case "wait_for": {
@@ -782,48 +882,31 @@ async function handleRequest(action, params, sessionId) {
       await attachDebugger(tabId);
       const timeout = params.timeout || 10000;
 
-      const waitResult = await execInTab(tabId, (selector, timeoutMs) => {
-        return new Promise((resolve) => {
-          // Check if already present
-          if (document.querySelector(selector)) {
-            resolve({ found: true, selector });
-            return;
-          }
-
-          const timer = setTimeout(() => {
-            observer.disconnect();
-            resolve({ __err: `Timed out waiting for: ${selector}` });
-          }, timeoutMs);
-
-          const observer = new MutationObserver(() => {
-            if (document.querySelector(selector)) {
-              clearTimeout(timer);
-              observer.disconnect();
-              resolve({ found: true, selector });
-            }
-          });
-
-          observer.observe(document.body, { childList: true, subtree: true, attributes: true });
-        });
-      }, [params.selector, timeout]);
-      if (waitResult && waitResult.__err) throw new Error(waitResult.__err);
-      return waitResult;
+      // Poll across all frames — a MutationObserver can't see into iframes
+      // or shadow roots, so a sweep every 250ms is the reliable option.
+      const deadline = Date.now() + timeout;
+      for (;;) {
+        try {
+          await locateFrame(tabId, params.selector);
+          return { found: true, selector: params.selector };
+        } catch (err) {
+          if (err.message.startsWith("Invalid selector")) throw err;
+        }
+        if (Date.now() >= deadline) throw new Error(`Timed out waiting for: ${params.selector}`);
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
     }
 
     case "scroll": {
       const tabId = await resolveTabId(params.tab_id, sessionId);
       await attachDebugger(tabId);
-      const scrollResult = await execInTab(tabId, (x, y, selector, behavior) => {
-        const opts = { left: x, top: y, behavior };
-        if (selector) {
-          const el = document.querySelector(selector);
-          if (!el) return { __err: `Element not found: ${selector}` };
-          el.scrollBy(opts);
-        } else {
-          window.scrollBy(opts);
-        }
-        return { scrolled: { x, y }, selector: selector || "window" };
-      }, [params.x || 0, params.y || 0, params.selector, params.behavior || "instant"]);
+      const scrollOpts = { op: "scroll", selector: params.selector, x: params.x || 0, y: params.y || 0, behavior: params.behavior || "instant" };
+      if (params.selector) {
+        return await runElementOp(tabId, scrollOpts);
+      }
+      // Window scroll targets the main frame only — running it in all frames
+      // would scroll every iframe on the page.
+      const scrollResult = await execInTab(tabId, browserBridgeElementOp, [scrollOpts]);
       if (scrollResult && scrollResult.__err) throw new Error(scrollResult.__err);
       return scrollResult;
     }
