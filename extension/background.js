@@ -630,18 +630,6 @@ function axLabel(params) {
   return `role=${params.role || "*"} name=${params.name || "*"}`;
 }
 
-async function cdpPress(tabId, key, code, keyCode) {
-  await attachDebugger(tabId);
-  return withInputLock(tabId, async () => {
-    await cdpSend(tabId, "Input.dispatchKeyEvent", {
-      type: "keyDown", key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode,
-    });
-    await cdpSend(tabId, "Input.dispatchKeyEvent", {
-      type: "keyUp", key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode,
-    });
-  });
-}
-
 // Run a function in every frame of the tab. Returns the raw per-frame
 // results (each with frameId). Frames the extension can't inject into are
 // simply absent from the results.

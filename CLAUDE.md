@@ -119,13 +119,15 @@ If a page defeats the bridge entirely, drive the user's real browser with Playwr
 | `observe` | Screenshot + numbered interactive elements + URL/scroll state |
 | `observe_a11y` | Text-only hierarchical semantic outline (no screenshot, ~10x smaller) — for fast multi-step form/navigation flows |
 | `navigate` | Navigate to a URL |
-| `click` | Click element by CSS selector |
-| `type` | Type text into an input |
-| `eval_js` | Execute JS in page context |
+| `click` | Click element by role+name (a11y tree), observe id, or CSS selector |
+| `type` | Type text into an element by role+name, id, or selector (newlines → Enter) |
+| `press_key` | Press a key in the focused element (Enter, Tab, Escape, arrows, chars) with modifiers |
+| `eval_js` | Execute JS in page context (via CDP Runtime.evaluate — CSP-exempt) |
 | `fill_form` | Fill multiple form fields |
 | `get_element_info` | Get element attributes/position |
-| `wait_for` | Wait for selector to appear |
+| `wait_for` | Wait for an element by selector or role+name |
 | `scroll` | Scroll page or element |
+| `reload_extension` | Reload the extension from disk (development) |
 
 ## Multi-Session Tab Isolation
 
