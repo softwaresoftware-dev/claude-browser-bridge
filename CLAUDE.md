@@ -128,6 +128,7 @@ If a page defeats the bridge entirely, drive the user's real browser with Playwr
 | `wait_for` | Wait for an element by selector or role+name |
 | `scroll` | Scroll page or element |
 | `reload_extension` | Reload the extension from disk (development) |
+| `close_session_tabs` | Close every tab in this session's tab group |
 
 ## Multi-Session Tab Isolation
 
@@ -135,7 +136,7 @@ Each MCP client process generates a session ID on startup and sends it to the da
 
 The extension maps each session to a Chrome tab group (colored and labeled `Session <id>`). When no explicit `tab_id` is provided, `resolveTabId` scopes to the session's group — preferring the active tab within the group, then falling back to the most recently accessed tab. The `list_tabs` tool also filters by the session's group by default (pass `all_tabs: true` to see everything).
 
-When a session disconnects, the daemon sends a `session_end` message. The extension collapses the tab group and marks it as ended, preserving tabs for the user.
+When a session disconnects, the daemon sends a `session_end` message. By default the extension collapses the tab group and marks it as ended, preserving tabs for the user. If the session's MCP client was started with `close_tabs_on_session_end=true` (userConfig → `CLAUDE_PLUGIN_OPTION_CLOSE_TABS_ON_SESSION_END`), the client says so in its `hello`, the daemon forwards `closeTabs: true` on `session_end`, and the extension closes every tab in the group instead. Sessions can also close their group explicitly at any time with the `close_session_tabs` tool.
 
 Session group state is persisted to `chrome.storage.session` so it survives service worker restarts.
 

@@ -72,9 +72,34 @@ async function ensureTabInGroup(tabId, sessionId) {
   await chrome.tabs.group({ tabIds: [tabId], groupId: session.groupId });
 }
 
-async function handleSessionEnd(sessionId) {
+// Close every tab in the session's group (which removes the group itself).
+// Returns the number of tabs closed. Safe to call when the session has no group.
+async function closeSessionTabs(sessionId) {
+  const session = sessionGroups.get(sessionId);
+  if (!session) return 0;
+  let closed = 0;
+  try {
+    const tabs = await chrome.tabs.query({ groupId: session.groupId });
+    if (tabs.length > 0) {
+      await chrome.tabs.remove(tabs.map((t) => t.id));
+      closed = tabs.length;
+    }
+  } catch {
+    // Group/tabs already gone
+  }
+  sessionGroups.delete(sessionId);
+  await saveSessionGroups();
+  return closed;
+}
+
+async function handleSessionEnd(sessionId, { closeTabs = false } = {}) {
   const session = sessionGroups.get(sessionId);
   if (!session) return;
+
+  if (closeTabs) {
+    await closeSessionTabs(sessionId);
+    return;
+  }
 
   try {
     await chrome.tabGroups.update(session.groupId, {
@@ -175,7 +200,7 @@ function connect() {
 
     // Handle session lifecycle messages (no response expected)
     if (msg.type === "session_end") {
-      await handleSessionEnd(msg.sessionId);
+      await handleSessionEnd(msg.sessionId, { closeTabs: !!msg.closeTabs });
       return;
     }
 
@@ -760,6 +785,12 @@ async function handleRequest(action, params, sessionId) {
         windowId: t.windowId,
         groupId: t.groupId,
       }));
+    }
+
+    case "close_session_tabs": {
+      if (!sessionId) return { closed: 0 };
+      const closed = await closeSessionTabs(sessionId);
+      return { closed };
     }
 
     case "get_tab_info": {

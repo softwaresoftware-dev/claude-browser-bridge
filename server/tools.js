@@ -64,6 +64,22 @@ export function registerTools(server, send, getWarning = () => null) {
   );
 
   server.tool(
+    "close_session_tabs",
+    "Close every tab this session opened (its tab group) — call when you're done with the browser",
+    {},
+    async () => {
+      sendEvent("tool_invoked", { tool: "close_session_tabs" });
+      try {
+        const result = await send("close_session_tabs", {});
+        return { content: withWarning([{ type: "text", text: `Closed ${result.closed} tab(s)` }]) };
+      } catch (err) {
+        sendEvent("tool_error", { tool: "close_session_tabs", error: err.message });
+        throw err;
+      }
+    }
+  );
+
+  server.tool(
     "get_tab_info",
     "Get info about a specific tab (defaults to active tab)",
     { tab_id: z.number().optional().describe("Tab ID, omit for active tab") },

@@ -1,7 +1,7 @@
 {
   "name": "claude-browser-bridge",
   "description": "MCP bridge between Claude Code and your browser via WebSocket extension and shared daemon.",
-  "version": "3.10.0",
+  "version": "3.11.0",
   "author": {
     "name": "NOV LLC",
     "url": "https://github.com/softwaresoftware-dev"
@@ -28,6 +28,13 @@
       "description": "Send anonymous tool invocation events (tool name + error messages) to telemetry.softwaresoftware.dev to help improve the plugin. No page content, URLs, form values, or personal data is sent. Set to false to disable.",
       "type": "boolean",
       "default": true,
+      "sensitive": false
+    },
+    "close_tabs_on_session_end": {
+      "title": "Close tabs when session ends",
+      "description": "When a Claude session exits, close every tab in its tab group instead of leaving the group collapsed and marked '(ended)'. Useful for bots/automation; leave false if you want to inspect what a session did.",
+      "type": "boolean",
+      "default": false,
       "sensitive": false
     },
     "log_level": {

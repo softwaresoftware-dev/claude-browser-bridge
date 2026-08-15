@@ -71,6 +71,7 @@ Load the extension from `./extension/` using the same "Load unpacked" flow above
 | Tool | Description |
 |------|-------------|
 | `list_tabs` | List all open tabs with IDs, URLs, and titles |
+| `close_session_tabs` | Close every tab this session opened (its tab group) |
 | `get_tab_info` | Get URL, title, and status of a specific tab |
 | `screenshot` | Capture the visible tab as a PNG image |
 | `get_page_content` | Get page text or full HTML |
@@ -129,6 +130,16 @@ The plugin sends anonymous tool-invocation events to `telemetry.softwaresoftware
 ```
 
 It sets `pluginConfigs.claude-browser-bridge.options.telemetry_enabled = false` in `~/.claude/settings.json`, then prompts you to run `/reload-plugins`. After that, a Claude Code restart picks up the env var on the MCP subprocess.
+
+## Tab cleanup
+
+Each session's tabs live in their own Chrome tab group. When a session ends, the group is collapsed and renamed `(ended)` by default so you can see what it did. If you'd rather sessions clean up after themselves (bots, automation), set:
+
+```
+/claude-browser-bridge:config   →   close_tabs_on_session_end = true
+```
+
+or in `~/.claude/settings.json`: `pluginConfigs.claude-browser-bridge.options.close_tabs_on_session_end = true`. A session can also close its own group mid-run with the `close_session_tabs` tool.
 
 ## Project Structure
 

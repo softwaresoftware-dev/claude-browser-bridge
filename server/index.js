@@ -21,6 +21,8 @@ const RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 10000;
 const log = createLogger("browser-bridge");
 const sessionId = randomUUID().slice(0, 8);
+// userConfig.close_tabs_on_session_end → close this session's tab group when the session exits
+const CLOSE_TABS_ON_END = /^(1|true|yes)$/i.test(process.env.CLAUDE_PLUGIN_OPTION_CLOSE_TABS_ON_SESSION_END || "");
 
 // --- IPC client (talks to daemon) ---
 
@@ -39,7 +41,7 @@ function connectToDaemon() {
       log.info(`Connected to daemon at ${ipcAddress} (session ${sessionId})`);
       ipcSocket = socket;
       reconnectDelay = RECONNECT_DELAY;
-      sendNdjson(socket, { type: "hello", sessionId });
+      sendNdjson(socket, { type: "hello", sessionId, closeTabsOnEnd: CLOSE_TABS_ON_END });
       resolve(socket);
     });
 

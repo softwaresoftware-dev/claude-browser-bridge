@@ -3849,8 +3849,8 @@ var ipcServer = (0, import_net.createServer)((socket) => {
   });
   const onMessage = (msg) => {
     if (msg.type === "hello") {
-      clients.set(socket, { sessionId: msg.sessionId });
-      log.info(`IPC client identified as session ${msg.sessionId}`);
+      clients.set(socket, { sessionId: msg.sessionId, closeTabsOnEnd: !!msg.closeTabsOnEnd });
+      log.info(`IPC client identified as session ${msg.sessionId}${msg.closeTabsOnEnd ? " (close tabs on end)" : ""}`);
       return;
     }
     if (msg.type !== "request") return;
@@ -3885,7 +3885,9 @@ var ipcServer = (0, import_net.createServer)((socket) => {
     log.debug(`IPC client disconnected (session ${sid || "unknown"})`);
     clients.delete(socket);
     if (sid && extensionSocket && extensionSocket.readyState === extensionSocket.OPEN) {
-      extensionSocket.send(JSON.stringify({ type: "session_end", sessionId: sid }));
+      extensionSocket.send(
+        JSON.stringify({ type: "session_end", sessionId: sid, closeTabs: !!clientInfo?.closeTabsOnEnd })
+      );
     }
     for (const [id, entry] of pending) {
       if (entry.clientSocket === socket) {

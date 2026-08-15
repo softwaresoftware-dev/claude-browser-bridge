@@ -21088,6 +21088,21 @@ function registerTools(server, send, getWarning = () => null) {
     }
   );
   server.tool(
+    "close_session_tabs",
+    "Close every tab this session opened (its tab group) \u2014 call when you're done with the browser",
+    {},
+    async () => {
+      sendEvent("tool_invoked", { tool: "close_session_tabs" });
+      try {
+        const result = await send("close_session_tabs", {});
+        return { content: withWarning([{ type: "text", text: `Closed ${result.closed} tab(s)` }]) };
+      } catch (err) {
+        sendEvent("tool_error", { tool: "close_session_tabs", error: err.message });
+        throw err;
+      }
+    }
+  );
+  server.tool(
     "get_tab_info",
     "Get info about a specific tab (defaults to active tab)",
     { tab_id: external_exports.number().optional().describe("Tab ID, omit for active tab") },
@@ -21454,6 +21469,7 @@ var RECONNECT_DELAY = 1e3;
 var MAX_RECONNECT_DELAY = 1e4;
 var log = createLogger("browser-bridge");
 var sessionId = randomUUID2().slice(0, 8);
+var CLOSE_TABS_ON_END = /^(1|true|yes)$/i.test(process.env.CLAUDE_PLUGIN_OPTION_CLOSE_TABS_ON_SESSION_END || "");
 var pending = /* @__PURE__ */ new Map();
 var ipcAddress = getIpcAddress();
 var ipcSocket = null;
@@ -21467,7 +21483,7 @@ function connectToDaemon() {
       log.info(`Connected to daemon at ${ipcAddress} (session ${sessionId})`);
       ipcSocket = socket;
       reconnectDelay = RECONNECT_DELAY;
-      sendNdjson(socket, { type: "hello", sessionId });
+      sendNdjson(socket, { type: "hello", sessionId, closeTabsOnEnd: CLOSE_TABS_ON_END });
       resolve(socket);
     });
     socket.on("data", createNdjsonParser((msg) => {
