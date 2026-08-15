@@ -793,6 +793,31 @@ async function handleRequest(action, params, sessionId) {
       return { closed };
     }
 
+    case "close_tab_groups": {
+      // Close every Claude tab group whose title contains `title_pattern`
+      // (default: "(ended)" — orphaned groups from finished sessions).
+      const pattern = params.title_pattern || "(ended)";
+      const groups = await chrome.tabGroups.query({});
+      const matched = groups.filter((g) => g.title && g.title.startsWith("Claude ") && g.title.includes(pattern));
+      let closedTabs = 0;
+      for (const g of matched) {
+        try {
+          const tabs = await chrome.tabs.query({ groupId: g.id });
+          if (tabs.length) {
+            await chrome.tabs.remove(tabs.map((t) => t.id));
+            closedTabs += tabs.length;
+          }
+        } catch {
+          // already gone
+        }
+        for (const [sid, info] of sessionGroups) {
+          if (info.groupId === g.id) sessionGroups.delete(sid);
+        }
+      }
+      await saveSessionGroups();
+      return { groups: matched.length, tabs: closedTabs, titles: matched.map((g) => g.title) };
+    }
+
     case "get_tab_info": {
       const tabId = await resolveTabId(params.tab_id, sessionId);
       const tab = await chrome.tabs.get(tabId);

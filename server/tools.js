@@ -80,6 +80,24 @@ export function registerTools(server, send, getWarning = () => null) {
   );
 
   server.tool(
+    "close_tab_groups",
+    "Close Claude tab groups left behind by other sessions. By default closes every group marked '(ended)'; pass title_pattern to match a substring of the group title instead (e.g. a session id)",
+    {
+      title_pattern: z.string().optional().describe("Substring the group title must contain (default: '(ended)')"),
+    },
+    async ({ title_pattern }) => {
+      sendEvent("tool_invoked", { tool: "close_tab_groups" });
+      try {
+        const r = await send("close_tab_groups", { title_pattern });
+        return { content: withWarning([{ type: "text", text: `Closed ${r.groups} group(s), ${r.tabs} tab(s): ${r.titles.join(", ") || "none"}` }]) };
+      } catch (err) {
+        sendEvent("tool_error", { tool: "close_tab_groups", error: err.message });
+        throw err;
+      }
+    }
+  );
+
+  server.tool(
     "get_tab_info",
     "Get info about a specific tab (defaults to active tab)",
     { tab_id: z.number().optional().describe("Tab ID, omit for active tab") },
