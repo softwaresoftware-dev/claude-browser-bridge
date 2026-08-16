@@ -71,6 +71,7 @@ Load the extension from `./extension/` using the same "Load unpacked" flow above
 | Tool | Description |
 |------|-------------|
 | `list_tabs` | List all open tabs with IDs, URLs, and titles |
+| `close_tab` | Close one tab by id (tidy up a tab you opened) |
 | `close_session_tabs` | Close every tab this session opened (its tab group) |
 | `close_tab_groups` | Close orphaned `(ended)` Claude tab groups (or groups matching a title substring) |
 | `get_tab_info` | Get URL, title, and status of a specific tab |

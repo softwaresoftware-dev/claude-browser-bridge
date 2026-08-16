@@ -128,6 +128,7 @@ If a page defeats the bridge entirely, drive the user's real browser with Playwr
 | `wait_for` | Wait for an element by selector or role+name |
 | `scroll` | Scroll page or element |
 | `reload_extension` | Reload the extension from disk (development) |
+| `close_tab` | Close one tab by id — tidy up tabs you opened |
 | `close_session_tabs` | Close every tab in this session's tab group |
 | `close_tab_groups` | Close orphaned `(ended)` Claude tab groups (or groups matching a title substring) |
 

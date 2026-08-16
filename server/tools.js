@@ -80,6 +80,24 @@ export function registerTools(server, send, getWarning = () => null) {
   );
 
   server.tool(
+    "close_tab",
+    "Close one tab by id — use it to tidy up any tab you opened and no longer need (a page you navigated to, a preview, a login flow). Prefer this over leaving tabs behind.",
+    {
+      tab_id: z.number().describe("Tab ID (from list_tabs / navigate)"),
+    },
+    async ({ tab_id }) => {
+      sendEvent("tool_invoked", { tool: "close_tab" });
+      try {
+        const r = await send("close_tab", { tab_id });
+        return { content: withWarning([{ type: "text", text: r.closed ? `Closed tab ${tab_id}` : `Tab ${tab_id} not closed: ${r.reason || "unknown"}` }]) };
+      } catch (err) {
+        sendEvent("tool_error", { tool: "close_tab", error: err.message });
+        throw err;
+      }
+    }
+  );
+
+  server.tool(
     "close_tab_groups",
     "Close Claude tab groups left behind by other sessions. By default closes every group marked '(ended)'; pass title_pattern to match a substring of the group title instead (e.g. a session id)",
     {

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Browser Bridge",
-  "version": "2.9.0",
+  "version": "2.10.0",
   "description": "MCP bridge for Claude Code browser control",
   "permissions": ["activeTab", "tabs", "tabGroups", "scripting", "alarms", "debugger", "storage"],
   "host_permissions": ["<all_urls>"],

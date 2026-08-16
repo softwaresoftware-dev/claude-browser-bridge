@@ -793,6 +793,19 @@ async function handleRequest(action, params, sessionId) {
       return { closed };
     }
 
+    case "close_tab": {
+      // Close one specific tab by id (daemons/watchers use this to tidy tabs they opened, e.g. a live board or a
+      // one-off page). Refuses only if the id is missing; a tab that's already gone counts as closed.
+      const tid = params.tab_id;
+      if (tid === undefined || tid === null) throw new Error("Missing required parameter: tab_id");
+      try {
+        await chrome.tabs.remove(tid);
+        return { closed: true, tab_id: tid };
+      } catch {
+        return { closed: false, tab_id: tid, reason: "not found (already closed?)" };
+      }
+    }
+
     case "close_tab_groups": {
       // Close every Claude tab group whose title contains `title_pattern`
       // (default: "(ended)" — orphaned groups from finished sessions).
