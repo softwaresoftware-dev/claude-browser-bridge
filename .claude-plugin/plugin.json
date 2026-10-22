@@ -3,7 +3,7 @@
   "description": "MCP bridge between Claude Code and your browser via WebSocket extension and shared daemon.",
   "version": "3.13.0",
   "author": {
-    "name": "NOV LLC",
+    "name": "GRAV LLC",
     "url": "https://github.com/softwaresoftware-dev"
   },
   "repository": "https://github.com/softwaresoftware-dev/claude-browser-bridge",
